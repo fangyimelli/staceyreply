@@ -1,4 +1,4 @@
-import type { OhlcvBar } from '../types/domain.js';
+import type { OhlcvBar } from '../types/domain';
 
 const toBar = (r: Record<string, string>): OhlcvBar => ({
   time: r.time,

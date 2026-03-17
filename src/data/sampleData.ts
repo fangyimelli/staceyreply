@@ -1,4 +1,4 @@
-import type { OhlcvBar } from '../types/domain.js';
+import type { OhlcvBar } from '../types/domain';
 
 export const sampleBars = (): OhlcvBar[] => {
   const out: OhlcvBar[] = []; let p = 1.1000; const start = Date.parse('2025-01-01T00:00:00Z');

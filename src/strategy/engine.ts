@@ -1,5 +1,5 @@
-import { Candle, StrategyMarker, StrategyResult } from '../types.js';
-import type { CandidateDate, InternalDayAnalysis, OhlcvBar, ReplyMode, StrategyLine } from '../types/domain.js';
+import { Candle, StrategyMarker, StrategyResult } from '../types';
+import type { CandidateDate, InternalDayAnalysis, OhlcvBar, ReplyMode, StrategyLine } from '../types/domain';
 
 function ema(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
