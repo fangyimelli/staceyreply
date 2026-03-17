@@ -7,6 +7,7 @@ Local single-page app for Day 3 practice/reply workflow. It loads local OHLCV CS
 ## What this app does
 
 - Includes built-in symbols/datasets for immediate demo use without requiring any file upload.
+- Built-in default source now auto-loads `sample/frd_fgd_three_day_windows.csv` on startup.
 - Loads one local CSV/JSON file or a folder selection of CSV/JSON files (multi-select upload).
 - Analyzes uploaded CSV/folder data first and treats uploaded data as the primary source for real analysis.
 - Scans uploaded symbols for FRD/FGD candidate Day 3 dates before normal replay/analysis.
@@ -80,7 +81,7 @@ Open `http://localhost:4173`.
 3. Click **Apply trade to PnL** to add that trade’s result to cumulative PnL.
 
 ### 7) Use sample mode
-- On first load, app starts with `SAMPLE` data so chart and explain panel are visible immediately.
+- On first load, app first attempts to auto-load built-in `frd_fgd_three_day_windows.csv`; if unavailable, it falls back to `SAMPLE` data.
 - Uploading your own files replaces active datasets with uploaded data.
 
 ### 8) Read detected candidate dates
@@ -452,7 +453,7 @@ When state transitions look wrong:
 Only explicitly confirmed features are listed below:
 1. Load local CSV / JSON OHLCV
 2. Load a folder of symbol files
-3. Include built-in symbols/datasets for immediate use
+3. Include built-in symbols/datasets for immediate use (default: `frd_fgd_three_day_windows.csv`)
 4. After upload, analyze and screen FRD / FGD candidate dates first
 5. Show detected final candidate dates explicitly
 6. In practice mode, only show filtered dates
