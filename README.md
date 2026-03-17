@@ -6,15 +6,20 @@ Local single-page app for Day 3 practice/reply workflow. It loads local OHLCV CS
 
 ## What this app does
 
+- Includes built-in symbols/datasets for immediate demo use without requiring any file upload.
 - Loads one local CSV/JSON file or a folder selection of CSV/JSON files (multi-select upload).
+- Analyzes uploaded CSV/folder data first and treats uploaded data as the primary source for real analysis.
 - Scans uploaded symbols for FRD/FGD candidate Day 3 dates before normal replay/analysis.
 - Shows detected candidate dates explicitly in the UI.
-- Supports practice mode (filtered dates only) so date selection focuses on scanned FRD/FGD candidates.
+- Supports practice mode (screened-passed dates only) so date selection focuses on scanned FRD/FGD candidates.
 - Supports Auto Reply (automatic entry/exit logic + cumulative PnL).
 - Supports Manual Reply (manual entry/exit + cumulative PnL).
 - Supports timeframes: `1m / 5m / 15m / 1h / 4h / 1D`.
 - Rebuilds higher timeframes from 1m bars.
 - Uses `America/New_York` session logic for strategy timing.
+- Runs a layered internal pipeline: CSV parsing → timeframe rebuild → FRD/FGD screening → day-state classification → replay checkpoint generation → Auto/Manual state prep → final result packaging.
+- In Normal mode, UI emphasizes final screened results and hides raw intermediate internals by default.
+- In Debug/Developer mode, UI and logs expose intermediate traces, rejected dates, and rule states.
 - Renders a candlestick chart with required overlays and right-side explain panel with rule-traceable reasoning.
 
 ---
@@ -82,11 +87,17 @@ Open `http://localhost:4173`.
 - The text line `Detected candidate dates:` lists scanned results as `YYYY-MM-DD(FGD|FRD)`.
 - Practice mode can restrict date dropdown to this filtered set.
 
-### 9) Read the explain panel
+### 9) Normal mode vs Debug mode
+- **Normal mode visibility boundary:** focuses on final screened outcomes used for replay/practice/trade decisions.
+- **Normal mode default:** intermediate raw internals (trace logs, rejected candidates, low-level rule transitions) are hidden.
+- **Debug mode visibility boundary:** exposes intermediate traces, rejected dates, and rule-state transitions for diagnosis.
+- Use Debug mode when validating why a date passed/failed screening or why a specific rule gate blocked entry.
+
+### 10) Read the explain panel
 - Explain panel reports template (FGD/FRD), bias, stage, missing conditions, target tier, and trade/PnL summary.
 - Missing conditions are explicit rule checkpoints (for example `20EMA confirm missing`, `stop hunt missing`, `123 missing`, `skip: stop too large`).
 
-### 10) Read chart annotations
+### 11) Read chart annotations
 Chart includes:
 - candlesticks
 - 20EMA
@@ -98,13 +109,13 @@ Chart includes:
 - stop
 - TP30 / TP35 / TP40 / TP50
 
-### 11) How cumulative PnL works
+### 12) How cumulative PnL works
 - Each click of **Apply trade to PnL** adds current trade `pnlPips` to running total.
 - Auto mode uses computed trade from strategy engine.
 - Manual mode uses user-provided entry/exit and selected line direction.
 
 
-### 12) Replay Mode (TradingView-like)
+### 13) Replay Mode (TradingView-like)
 Replay behavior is defined to feel close to TradingView Replay while preserving rule-traceable Day 3 logic:
 
 1. **Replay start point (context first)**
@@ -139,7 +150,7 @@ Replay behavior is defined to feel close to TradingView Replay while preserving 
    - When replay pauses or auto-stops, chart shows an explicit on-chart state banner.
    - Explain panel updates live with current day type, confirmed rules, missing rules, and FRD/FGD readiness.
 
-### 13) Replay checkpoint states
+### 14) Replay checkpoint states
 Replay supports auto-stop checkpoints and chart labels for these important states:
 
 - Pump Day complete
@@ -167,7 +178,7 @@ Replay supports auto-stop checkpoints and chart labels for these important state
 - Trade entered
 - Trade exited
 
-### 14) Replay commentary + day narrative
+### 15) Replay commentary + day narrative
 - Replay acts like a live analyst from revealed bars only:
   - what just happened
   - current state
@@ -233,6 +244,22 @@ Replay supports auto-stop checkpoints and chart labels for these important state
 ---
 
 ## Debug Guide (Development)
+
+### Mode visibility boundaries (Normal vs Debug)
+- **Normal mode:** displays final screened results only (selected candidate outcomes, final explain state, final chart annotations used for user decisions).
+- **Debug mode:** additionally surfaces intermediate internals, including candidate screening traces, rejected dates, and rule-state transitions.
+- Keep debugging focused on traceability: each exposed debug state should map back to a specific rule or pipeline stage.
+
+### Internal analysis pipeline (for tracing)
+1. CSV parsing
+2. Timeframe rebuild
+3. FRD/FGD screening
+4. Day-state classification
+5. Replay checkpoint generation
+6. Auto/Manual state preparation
+7. Final result packaging for UI
+
+Uploaded CSV/folder data runs through this pipeline first and is treated as the primary source for real analysis. Built-in sample datasets remain available for immediate demo use.
 
 ### Expected CSV format
 - Header must include exactly: `time,open,high,low,close,volume`.
@@ -389,7 +416,7 @@ Only explicitly confirmed features are listed below:
 2. Load a folder of symbol files
 3. After upload, scan and filter FRD / FGD candidate dates first
 4. Show detected dates explicitly
-5. In practice mode, only show filtered dates
+5. In practice mode, only show screened-passed dates
 6. Auto Reply = automatic entry / exit + cumulative PnL
 7. Manual Reply = manual entry / exit + cumulative PnL
 8. Support 1m / 5m / 15m / 1h / 4h / 1D
@@ -408,6 +435,12 @@ Only explicitly confirmed features are listed below:
 21. README
 22. Sample mode
 23. Auto-generated acceptance checklist
+24. Built-in symbols/datasets included for immediate demo use
+25. Uploaded CSV/folder data is analyzed first and treated as the primary source for real analysis
+26. Internal pipeline stages are explicit: CSV parsing, timeframe rebuild, FRD/FGD screening, day-state classification, replay checkpoint generation, Auto/Manual state prep, final result packaging
+27. Normal mode shows only final screened results by default; intermediate raw internals are hidden
+28. Debug/developer mode exposes intermediate traces, rejected dates, and rule states
+29. Clear Normal mode vs Debug mode visibility boundaries are documented
 
 ### Not Yet Confirmed / Not Included
 - Any broker API integration.
