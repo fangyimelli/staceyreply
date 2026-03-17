@@ -3,8 +3,9 @@ import { aggregateFrom1m, ema } from './aggregation/timeframe';
 import { sampleBars1m } from './data/sampleData';
 import { parseFile } from './parser/parseLocalData';
 import { detectCandidates, evaluateDay } from './strategy/engine';
-import type { ReplyMode, ScreenedResultRow, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
+import type { DebugArtifacts, ReplyMode, ScreenedResultRow, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
+import { formatDebugArtifacts, formatDebugPayload } from './ui/debugFormat';
 import { ExplainPanel } from './ui/ExplainPanel';
 
 const timeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
@@ -13,18 +14,56 @@ const buildScreenedResults = (
   datasets: SymbolDataset[],
   lineFilter: { enableFGD: boolean; enableFRD: boolean },
   replyMode: ReplyMode
-): ScreenedResultRow[] => {
+): { rows: ScreenedResultRow[]; debugArtifacts: DebugArtifacts } => {
+  const debugArtifacts: DebugArtifacts = {
+    rawScanTraces: [],
+    rejectedDates: [],
+    internalRuleStates: [],
+  };
+
   const rows = datasets.flatMap((dataset) => {
-    const candidates = detectCandidates(dataset.symbol, dataset.bars1m).filter(
-      (candidate) => (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD)
-    );
+    const scanned = detectCandidates(dataset.symbol, dataset.bars1m);
+    debugArtifacts.rawScanTraces.push(...scanned);
 
-    return candidates.map((candidate) => {
-      const dayEval = evaluateDay(candidate.type, aggregateFrom1m(dataset.bars1m, '5m'), candidate.date, replyMode, { entry: 0, exit: 0 });
+    return scanned.flatMap((candidate) => {
+      const lineEnabled = (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD);
+      if (!lineEnabled) {
+        debugArtifacts.rejectedDates.push({
+          symbol: dataset.symbol,
+          candidateDate: candidate.date,
+          lineType: candidate.type,
+          reason: `Filtered out: ${candidate.type} toggle is disabled`,
+        });
+        return [];
+      }
+
+      const dayEval = evaluateDay(candidate.type, aggregateFrom1m(dataset.bars1m, '5m'), candidate.date, replyMode, {
+        entry: 0,
+        exit: 0,
+      });
+
+      debugArtifacts.internalRuleStates.push({
+        symbol: dataset.symbol,
+        candidateDate: candidate.date,
+        lineType: candidate.type,
+        stage: dayEval.explain.stage,
+        entryAllowed: dayEval.explain.entryAllowed,
+        reasons: dayEval.explain.reasons,
+        missingConditions: dayEval.explain.missingConditions,
+      });
+
       const replayAvailable = dayEval.explain.entryAllowed;
-      const validity: ScreenedResultRow['validity'] = replayAvailable ? 'pass' : 'fail';
+      if (!replayAvailable) {
+        debugArtifacts.rejectedDates.push({
+          symbol: dataset.symbol,
+          candidateDate: candidate.date,
+          lineType: candidate.type,
+          reason: `Rule state rejected: ${dayEval.explain.missingConditions.join(', ') || 'entry not qualified yet'}`,
+        });
+      }
 
-      return {
+      const validity: ScreenedResultRow['validity'] = replayAvailable ? 'pass' : 'fail';
+      return [{
         symbol: dataset.symbol,
         candidateDate: candidate.date,
         lineType: candidate.type,
@@ -34,11 +73,23 @@ const buildScreenedResults = (
           ? `Run ${replyMode === 'auto' ? 'Auto Reply' : 'Manual Reply'} replay`
           : 'Skip until setup conditions become valid',
         currentTargetTier: dayEval.explain.targetTier,
-      };
+        debug: {
+          scanReason: candidate.reason,
+          rejectionReason: replayAvailable
+            ? undefined
+            : `Rule state rejected: ${dayEval.explain.missingConditions.join(', ') || 'entry not qualified yet'}`,
+          ruleState: {
+            stage: dayEval.explain.stage,
+            entryAllowed: dayEval.explain.entryAllowed,
+            reasons: dayEval.explain.reasons,
+            missingConditions: dayEval.explain.missingConditions,
+          },
+        },
+      }];
     });
   });
 
-  return rows.filter((row) => row.validity === 'pass');
+  return { rows: rows.filter((row) => row.validity === 'pass'), debugArtifacts };
 };
 
 export default function App() {
@@ -50,15 +101,17 @@ export default function App() {
   const [enableFRD, setEnableFRD] = useState(true);
   const [practiceOnly, setPracticeOnly] = useState(true);
   const [replyMode, setReplyMode] = useState<ReplyMode>('auto');
+  const [debugMode, setDebugMode] = useState(false);
   const [manualEntry, setManualEntry] = useState('');
   const [manualExit, setManualExit] = useState('');
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [totalPnl, setTotalPnl] = useState(0);
 
-  const screenedResults = useMemo(
+  const screenedState = useMemo(
     () => buildScreenedResults(datasets, { enableFGD, enableFRD }, replyMode),
     [datasets, enableFGD, enableFRD, replyMode]
   );
+  const screenedResults = screenedState.rows;
 
   const active = datasets.find((d) => d.symbol === symbol) ?? datasets[0];
   const bars = useMemo(() => aggregateFrom1m(active.bars1m, tf), [active.bars1m, tf]);
@@ -102,6 +155,7 @@ export default function App() {
         <label><input type="checkbox" checked={enableFGD} onChange={(e) => setEnableFGD(e.target.checked)} />FGD on</label>
         <label><input type="checkbox" checked={enableFRD} onChange={(e) => setEnableFRD(e.target.checked)} />FRD on</label>
         <label><input type="checkbox" checked={practiceOnly} onChange={(e) => setPracticeOnly(e.target.checked)} />Practice mode (filtered dates only)</label>
+        <label><input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />Debug mode</label>
         <select value={day} onChange={(e) => setSelectedDate(e.target.value)}>{dayChoices.map((d) => <option key={d}>{d}</option>)}</select>
         <select value={replyMode} onChange={(e) => setReplyMode(e.target.value as ReplyMode)}><option value="auto">Auto Reply</option><option value="manual">Manual Reply</option></select>
         {replyMode === 'manual' && (
@@ -146,6 +200,25 @@ export default function App() {
           </table>
         )}
       </section>
+
+      {debugMode && (
+        <section style={{ margin: '12px 0', padding: 10, border: '1px solid #cbd5e1', background: '#f8fafc' }}>
+          <h3>Debug Panel (Intermediate Artifacts)</h3>
+          <h4>Raw Scan Traces</h4>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rejectedDates: [], internalRuleStates: [] })}</pre>
+          <h4>Rejected Dates</h4>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rawScanTraces: [], internalRuleStates: [] })}</pre>
+          <h4>Internal Rule States</h4>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rawScanTraces: [], rejectedDates: [] })}</pre>
+          <h4>Passed Rows (Debug Payload)</h4>
+          {screenedResults.filter((row) => row.symbol === symbol).map((row) => (
+            <pre key={`debug-${row.symbol}-${row.candidateDate}-${row.lineType}`} style={{ whiteSpace: 'pre-wrap' }}>
+              {row.symbol} {row.candidateDate} {row.lineType}{'\n'}
+              {formatDebugPayload(row.debug)}
+            </pre>
+          ))}
+        </section>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1 }}>
