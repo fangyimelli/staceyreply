@@ -25,7 +25,9 @@ function render(): void {
   const tf = timeframeEl.value as SupportedTimeframe;
   const candles = aggregateFrom1m(datasets[0].candles1m, tf);
   const detected = scanCandidateDates(datasets[0].candles1m).filter((d) => modeEl.value !== "practice" || d.needsPractice);
-  datesEl.innerHTML = detected.map((d) => `<div>${d.date} — ${d.rule} — ${d.reason}</div>`).join("");
+  datesEl.innerHTML = detected
+    .map((d) => `<div>${d.date} — ${d.rule} — ${d.reason}${d.needsPractice ? ` — Practice: ${d.practiceReason}` : ""}</div>`)
+    .join("");
 
   const result = runStrategy(candles);
   renderExplainPanel(explainEl, result);

@@ -52,7 +52,9 @@ function render() {
   fullCandles = aggregateFrom1m(datasets[0].candles1m, tf);
   filteredDates = scanCandidateDates(datasets[0].candles1m).filter((d) => modeEl.value !== 'practice' || d.needsPractice);
 
-  datesEl.innerHTML = filteredDates.map((d) => `<div>${d.date} — ${d.rule} — ${d.reason}</div>`).join('');
+  datesEl.innerHTML = filteredDates
+    .map((d) => `<div>${d.date} — ${d.rule} — ${d.reason}${d.needsPractice ? ` — Practice: ${d.practiceReason}` : ''}</div>`)
+    .join('');
   candidateDateEl.innerHTML = filteredDates.map((d) => `<option value="${d.date}">${d.date} (${d.rule})</option>`).join('');
 
   replay.cursor = clampCursor(replay.cursor, fullCandles.length);
