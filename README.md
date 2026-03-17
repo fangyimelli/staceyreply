@@ -163,7 +163,7 @@ Replay behavior is defined to feel close to TradingView Replay while preserving 
    - Explain panel updates live with current day type, confirmed rules, missing rules, and FRD/FGD readiness.
 
 ### 14) Replay checkpoint states
-Replay supports auto-stop checkpoints and chart labels for these important states:
+Replay auto-pause checkpoints and chart labels are a core behavior (not optional decoration) and must include at least:
 
 - Pump Day complete
 - Dump Day complete
@@ -173,7 +173,7 @@ Replay supports auto-stop checkpoints and chart labels for these important state
 - FGD signal day detected
 - D-1 body >= 40 pips
 - D-1 body >= 60% of full-day range
-- Inside day detected for FRD context
+- Inside day detected
 - Day 3 begins
 - New York session begins
 - Source detected
@@ -188,15 +188,9 @@ Replay supports auto-stop checkpoints and chart labels for these important state
 - Target tier = 40
 - Target tier = 50
 - Trade entered
-- TP30 reached
-- TP35 reached
-- TP40 reached
-- TP50 reached
-- Stop hit
-- New York session end
 - Trade exited
 
-At each auto-pause checkpoint, the chart must show on-chart state labels/banners such as:
+At each auto-pause checkpoint, the chart must show an on-chart interpretation label/banner such as:
 - `Pump Day complete`
 - `Tomorrow may be FRD`
 - `FRD signal day detected`
@@ -225,52 +219,6 @@ At each auto-pause checkpoint, the chart must show on-chart state labels/banners
   - FRD or FGD signal day
   - Day 3 trading day
 
-
-### 16) Post-entry replay + TP box requirements
-Post-entry management is part of replay and must not be truncated at entry:
-
-1. **Continue chart after entry (Auto + Manual)**
-   - Replay/chart does not stop visually at entry trigger.
-   - After entry, candles keep revealing until New York session ends.
-   - User can observe continuation, pullback, target hit, stop hit, and session-end closeout.
-2. **New York session end visibility**
-   - Once entry occurs, replay keeps showing all remaining candles in the relevant New York session window until session end.
-   - Chart clearly labels post-entry management phase.
-   - Explain panel keeps updating after entry until New York session end.
-3. **Post-entry analyst state updates**
-   - During post-entry replay, chart/explain panel continue labeling states like:
-     - `Trade active`
-     - `In profit`
-     - `Pullback after entry`
-     - `TP30 reached`
-     - `TP35 reached`
-     - `TP40 reached`
-     - `TP50 reached`
-     - `Stop hit`
-     - `Holding into NY session close`
-     - `Exited at NY session end`
-4. **TP as TradingView-like boxes**
-   - TP30/TP35/TP40/TP50 are rendered as rectangular TP boxes/zones, not only thin lines/markers.
-   - Each TP box is visually distinct and clearly shows entry-to-target relationship.
-5. **TP box lifecycle behavior**
-   - TP boxes appear after entry becomes valid.
-   - TP boxes stay visible during post-entry replay.
-   - TP hit state visually updates when price reaches each TP box.
-   - If trade is skipped because stop is too large, TP boxes are not shown as active trade targets.
-6. **TradingView-like position visualization**
-   - Post-entry chart at minimum shows entry level, stop zone, TP zones, and active trade duration from entry to exit/NY close.
-7. **Replay controls/checkpoints after entry**
-   - Replay still supports play/pause/step forward/step backward after entry.
-   - Auto-pause checkpoints include: `trade entered`, `TP30 reached`, `TP35 reached`, `TP40 reached`, `TP50 reached`, `stop hit`, `NY session end`, `trade exited`.
-8. **Explain panel after entry**
-   - Continues to show current trade status, open/realized PnL, TP reached/not reached, stop active state, hold-into-session-close state, and final exit reason (`target hit` / `stop hit` / `manual exit` / `session end exit`).
-9. **Architecture extension requirements**
-   - Extend replay engine for post-entry management states until NY session end.
-   - Extend annotations/overlay layer for rectangular TP boxes.
-   - Extend trade simulator to emit post-entry milestone events.
-   - Extend explain panel state model for post-entry lifecycle.
-10. **README debug requirements**
-   - Document replay continuation to NY session end, TP box behavior, post-entry status updates, TP box placement debugging, and session-end exit debugging.
 
 ---
 
@@ -491,16 +439,6 @@ When state transitions look wrong:
 - Ensure no future bar data is being read when constructing pause labels.
 
 
-### TP box placement looks wrong
-- Confirm TP zone math is generated from entry + configured tier offsets (30/35/40/50) with correct side direction.
-- Verify zone top/bottom values passed to annotation renderer, not just a single price line.
-- Ensure TP boxes are created only after entry is valid and hidden when `skip: stop too large` blocks trade activation.
-
-### Replay did not continue to New York session end after entry
-- Verify post-entry replay state remains active until NY session close checkpoint.
-- Confirm replay engine uses revealed-candle boundaries only and does not prematurely finalize at entry.
-- Validate exit reason emitted by simulator (`target`, `stop`, `manual`, or `session end`) and that explain panel reflects same source state.
-
 ---
 
 ## Developer Notes
@@ -529,20 +467,17 @@ Only explicitly confirmed features are listed below:
 15. Chart must support mouse-wheel zoom like TradingView
 16. Chart must support drag/pan like TradingView
 17. Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50
-18. TP levels must be displayed as TradingView-like boxes/zones
-19. After entry, chart/replay must continue until New York session end
-20. Right-side explain panel with rule-based reasoning
-21. Explain panel must continue updating after entry
-22. Add expanded explanation documentation
-23. Add debug-friendly README
-24. Replay Mode similar to TradingView Replay
-25. Replay starts from the day before the selected FRD/FGD date
-26. Replay can auto-stop at important market/strategy states
-27. Replay must auto-pause at key moments and show on-chart state labels
-28. Frontend should display only final screened results by default
-29. README
-30. Sample mode
-31. Auto-generated acceptance checklist
+18. Right-side explain panel with rule-based reasoning
+19. Add expanded explanation documentation
+20. Add debug-friendly README
+21. Replay Mode similar to TradingView Replay
+22. Replay starts from the day before the selected FRD/FGD date
+23. Replay can auto-stop at important market/strategy states
+24. Replay must auto-pause at key moments and show on-chart state labels
+25. Frontend should display only final screened results by default
+26. README
+27. Sample mode
+28. Auto-generated acceptance checklist
 
 ### Not Yet Confirmed / Not Included
 - Any broker API integration.
