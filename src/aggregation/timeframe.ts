@@ -29,3 +29,13 @@ export const ema20 = (bars: OhlcvBar[]): number[] => {
   bars.forEach((b, i) => out.push(i === 0 ? b.close : b.close * k + out[i-1] * (1-k)));
   return out;
 };
+
+
+export const aggregateFrom1m = aggregate;
+export const ema = (bars: OhlcvBar[], period = 20): number[] => {
+  if (period === 20) return ema20(bars);
+  const k = 2 / (period + 1);
+  const out: number[] = [];
+  bars.forEach((b, i) => out.push(i === 0 ? b.close : b.close * k + out[i - 1] * (1 - k)));
+  return out;
+};
