@@ -104,14 +104,83 @@ Chart includes:
 - Manual mode uses user-provided entry/exit and selected line direction.
 
 
-### 12) Replay Mode (TradingView-style)
-1. Choose a filtered candidate date in the candidate date dropdown.
-2. Click **Jump Day 3 Start** to begin replay from that date.
-3. Use **Play / Pause / Step -1 / Step +1** to move bar-by-bar.
-4. Use speed control to change replay pace.
-5. Only candles up to the replay cursor are visible; explain panel, annotations, and PnL update from revealed candles only.
-6. In Manual mode, use **Set Manual Entry @ Current Close** and **Set Manual Exit @ Current Close** while replay is running.
-7. **Reveal Answer (Manual)** is optional and does not reveal hidden future candles.
+### 12) Replay Mode (TradingView-like)
+Replay behavior is defined to feel close to TradingView Replay while preserving rule-traceable Day 3 logic:
+
+1. **Replay start point (context first)**
+   - Selected FRD/FGD replay starts from the **previous day** (D-1 context), not only near entry.
+   - FRD replay exposes Pump Day / pre-FRD context first.
+   - FGD replay exposes Dump Day / pre-FGD context first.
+2. **Candlestick rendering style**
+   - Chart uses real OHLC candles.
+   - Candle body thickness remains visually uniform and stable as replay advances.
+   - Candle spacing stays consistent for readability.
+3. **Replay progression behavior**
+   - Replay advances bar-by-bar.
+   - User can pause at any step.
+   - Step forward/backward by one bar is supported.
+   - Replay can auto-stop at important checkpoints.
+4. **Replay controls**
+   - `Play`
+   - `Pause`
+   - `Step +1`
+   - `Step -1`
+   - `Jump prev checkpoint`
+   - `Jump next checkpoint`
+   - `Jump D-2 start`
+   - `Jump D-1 start`
+   - `Jump Day 3 start`
+   - Replay speed selector
+   - Toggle auto-stop checkpoints on/off
+5. **Partial-history integrity**
+   - During replay, labels/states/explanations/annotations/trade decisions/target grading must be computed only from currently revealed bars.
+   - Future candles must not influence current interpretation.
+6. **Explain + chart state visibility**
+   - When replay pauses or auto-stops, chart shows an explicit on-chart state banner.
+   - Explain panel updates live with current day type, confirmed rules, missing rules, and FRD/FGD readiness.
+
+### 13) Replay checkpoint states
+Replay supports auto-stop checkpoints and chart labels for these important states:
+
+- Pump Day complete
+- Dump Day complete
+- Possible FRD tomorrow
+- Possible FGD tomorrow
+- FRD signal day detected
+- FGD signal day detected
+- D-1 body >= 40 pips
+- D-1 body >= 60% of full-day range
+- Inside day detected for FRD context
+- Day 3 begins
+- New York session begins
+- Source detected
+- Stop hunt detected
+- 123 in progress
+- 123 confirmed
+- 20EMA confirm detected
+- Entry qualified
+- Stop too large -> skip
+- Target tier currently 30
+- Target tier upgraded to 35
+- Target tier upgraded to 40
+- Target tier upgraded to 50
+- Trade entered
+- Trade exited
+
+### 14) Replay commentary + day narrative
+- Replay acts like a live analyst from revealed bars only:
+  - what just happened
+  - current state
+  - what tomorrow might be
+  - what is still missing
+  - whether FRD/FGD conditions are forming
+  - whether entry is allowed yet
+  - whether setup improved or weakened
+- Explain/chart narrative must clearly show sequence:
+  - previous context day
+  - Pump Day or Dump Day
+  - FRD or FGD signal day
+  - Day 3 trading day
 
 ---
 
@@ -220,6 +289,40 @@ Chart includes:
 3. Inspect `trade` branch in `evaluateDay(...)` when `mode==='manual'`.
 4. Confirm side-aware pip calculation.
 
+### Replay architecture requirement
+Replay implementation should remain layered and explicit:
+- replay engine / replay state module
+- checkpoint detector module
+- chart state overlay module
+- strategy engine with day-state classification + partial-history evaluation
+- annotations with checkpoint-aware rendering
+- explain panel consuming replay state (no ad hoc UI-only recomputation)
+
+### Replay debugging: incorrect state transitions
+When state transitions look wrong:
+1. Confirm replay cursor index and visible-bar window are aligned.
+2. Confirm checkpoint detector evaluates only revealed bars.
+3. Verify state labels map to exact checkpoint IDs.
+4. Compare explain panel state against replay-state source object.
+5. Verify no future-bar leakage in strategy state evaluation.
+
+### Verify D-1 body 40 pips and 60% body/range checks
+1. Identify D-1 candle open, close, high, low in day aggregation.
+2. Compute body pips: `abs(close-open)` converted to pips.
+3. Compute range pips: `high-low` converted to pips.
+4. Compute body ratio: `body / range`.
+5. Check thresholds:
+   - `body >= 40 pips`
+   - `body/range >= 0.60`
+6. Confirm checkpoint labels and explain panel fields reflect these exact values.
+
+### Verify Pump Day / Dump Day / FRD / FGD transitions
+1. Validate daily sequence across context day, signal day, and Day 3.
+2. Confirm Pump/Dump completion checkpoints trigger on intended daily state.
+3. Confirm `Possible FRD/FGD tomorrow` checkpoints occur before signal-day confirmation.
+4. Confirm FRD/FGD signal-day detected checkpoint only fires when strategy criteria are met from revealed data.
+5. Confirm Day 3 begin checkpoint aligns with selected Day 3 start jump control.
+
 ### Common failure cases and how to debug
 1. Empty/NaN chart values:
    - Check CSV headers and numeric parsing in `parseCsv`.
@@ -293,14 +396,18 @@ Only explicitly confirmed features are listed below:
 9. Rebuild higher timeframes from 1m
 10. Use America/New_York timezone
 11. Main chart must be a real candlestick chart
-12. Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50
-13. Right-side explain panel with rule-based reasoning
-14. Add expanded explanation documentation
-15. Add debug-friendly README
-16. Replay Mode similar to TradingView Replay
-17. README
-18. Sample mode
-19. Auto-generated acceptance checklist
+12. Candles must have uniform TradingView-like thickness and spacing
+13. Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50
+14. Right-side explain panel with rule-based reasoning
+15. Add expanded explanation documentation
+16. Add debug-friendly README
+17. Replay Mode similar to TradingView Replay
+18. Replay starts from the day before the selected FRD/FGD date
+19. Replay can auto-stop at important market/strategy states
+20. On-chart state labels must show current status at each important step
+21. README
+22. Sample mode
+23. Auto-generated acceptance checklist
 
 ### Not Yet Confirmed / Not Included
 - Any broker API integration.

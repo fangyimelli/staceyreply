@@ -11,11 +11,15 @@
 - [x] Rebuild higher timeframes from 1m
 - [x] Use America/New_York timezone
 - [x] Main chart must be a real candlestick chart
+- [x] Candles must have uniform TradingView-like thickness and spacing
 - [x] Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50
 - [x] Right-side explain panel with rule-based reasoning
 - [x] Add expanded explanation documentation
 - [x] Add debug-friendly README
 - [x] Replay Mode similar to TradingView Replay
+- [x] Replay starts from the day before the selected FRD/FGD date
+- [x] Replay can auto-stop at important market/strategy states
+- [x] On-chart state labels must show current status at each important step
 - [x] README
 - [x] Sample mode
 - [x] Auto-generated acceptance checklist
