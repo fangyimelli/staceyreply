@@ -103,6 +103,16 @@ Chart includes:
 - Auto mode uses computed trade from strategy engine.
 - Manual mode uses user-provided entry/exit and selected line direction.
 
+
+### 12) Replay Mode (TradingView-style)
+1. Choose a filtered candidate date in the candidate date dropdown.
+2. Click **Jump Day 3 Start** to begin replay from that date.
+3. Use **Play / Pause / Step -1 / Step +1** to move bar-by-bar.
+4. Use speed control to change replay pace.
+5. Only candles up to the replay cursor are visible; explain panel, annotations, and PnL update from revealed candles only.
+6. In Manual mode, use **Set Manual Entry @ Current Close** and **Set Manual Exit @ Current Close** while replay is running.
+7. **Reveal Answer (Manual)** is optional and does not reveal hidden future candles.
+
 ---
 
 ## Rule Explanation
@@ -287,9 +297,10 @@ Only explicitly confirmed features are listed below:
 13. Right-side explain panel with rule-based reasoning
 14. Add expanded explanation documentation
 15. Add debug-friendly README
-16. README
-17. Sample mode
-18. Auto-generated acceptance checklist
+16. Replay Mode similar to TradingView Replay
+17. README
+18. Sample mode
+19. Auto-generated acceptance checklist
 
 ### Not Yet Confirmed / Not Included
 - Any broker API integration.
