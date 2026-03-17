@@ -6,12 +6,20 @@ export interface CandidateDate { symbol: string; date: string; type: StrategyLin
 export interface SymbolDataset { symbol: string; bars1m: OhlcvBar[]; }
 
 // Internal analysis structures (strategy / replay pipeline).
+export interface InternalRuleEvaluation {
+  id: string;
+  passed: boolean;
+  reason: string;
+  evidenceBars: string[];
+}
+
 export interface InternalExplainState {
   template: 'FGD' | 'FRD' | 'NONE';
   bias: 'LONG' | 'SHORT' | 'NEUTRAL';
   stage: string;
   missingConditions: string[];
   reasons: string[];
+  ruleEvaluations: InternalRuleEvaluation[];
   entryAllowed: boolean;
   targetTier: 30 | 35 | 40 | 50 | null;
 }
@@ -21,6 +29,7 @@ export interface InternalAnnotation {
   kind: string;
   barTime: string;
   price: number;
+  ruleId: string;
   ruleName: string;
   reasoning: string;
 }

@@ -9,17 +9,30 @@ function ema(values, period) {
   return out;
 }
 
+const createRule = (id, passed, reason, evidenceBars) => ({ id, passed, reason, evidenceBars });
+const findRule = (rules, id) => rules.find((rule) => rule.id === id) ?? createRule(id, false, 'Rule not evaluated.', []);
+
 export function runStrategy(candles) {
   if (!candles.length) {
+    const emptyRules = [
+      createRule('source-selection', false, 'No candles available to select a source.', []),
+      createRule('stop-hunt', false, 'No range available to determine stop-hunt behavior.', []),
+      createRule('setup-123', false, 'Need at least 3 candles to validate 1-2-3 sequencing.', []),
+      createRule('ema-alignment', false, 'Need candles to compute EMA20 alignment.', []),
+      createRule('target-tier-upgrade', false, 'Need entry/stop to evaluate target tier upgrades.', []),
+      createRule('classification-expansion', false, 'No expansion without visible candles.', [])
+    ];
+
     return {
-      explain: ['No candles revealed yet.'],
+      explain: emptyRules.map((rule) => `${rule.id}: ${rule.reason}`),
+      ruleEvaluations: emptyRules,
       stage: 'waiting-replay-start',
       validity: 'not valid Day 3',
-      sourceReason: 'Waiting for first revealed candle.',
-      stopHuntReason: 'Needs revealed range.',
-      setup123Reason: 'Needs revealed sequence.',
+      sourceReason: findRule(emptyRules, 'source-selection').reason,
+      stopHuntReason: findRule(emptyRules, 'stop-hunt').reason,
+      setup123Reason: findRule(emptyRules, 'setup-123').reason,
       entryReason: 'Entry appears after revealed data exists.',
-      targetTierReason: 'Targets appear after entry exists.',
+      targetTierReason: findRule(emptyRules, 'target-tier-upgrade').reason,
       overlays: { ema20: [], previousClose: 0, hos: 0, los: 0, hod: 0, lod: 0 },
       markers: []
     };
@@ -38,25 +51,53 @@ export function runStrategy(candles) {
   const stop = lod;
   const risk = Math.max(0.01, entry - stop);
 
+  const sourceRule = createRule('source-selection', true, `Source fixed to first revealed candle at ${first.time}.`, [first.time]);
+  const stopHuntPassed = last.low <= lod || last.high >= hod;
+  const stopHuntRule = createRule('stop-hunt', stopHuntPassed, stopHuntPassed ? 'Latest bar probes the visible range boundary (stop-hunt proxy).' : 'Latest bar has not probed range boundary yet.', [last.time]);
+  const setup123Passed = candles.length >= 3;
+  const setup123Evidence = candles.slice(Math.max(0, candles.length - 3)).map((c) => c.time);
+  const setup123Rule = createRule('setup-123', setup123Passed, setup123Passed ? 'Three-step sequence available from latest revealed bars.' : 'Need at least three revealed bars for 1-2-3 structure.', setup123Evidence);
+  const emaAligned = entry >= (ema20[ema20.length - 1] ?? entry);
+  const emaRule = createRule('ema-alignment', emaAligned, emaAligned ? 'Close is on/above EMA20.' : 'Close is below EMA20.', [last.time]);
+  const tierRule = createRule(
+    'target-tier-upgrade',
+    risk > 0,
+    risk > 0 ? 'Risk is positive; TP tiers can be promoted from TP30 to TP50.' : 'Risk is zero; TP tiers remain disabled.',
+    [last.time]
+  );
+
+  // ambiguous rule: legacy behavior classified FGD/FRD from absolute expansion (> 1).
+  // We keep that legacy expansion threshold inside a dedicated rule to preserve behavior transparently.
+  const expansionPassed = Math.abs(last.close - first.open) > 1;
+  const classificationRule = createRule(
+    'classification-expansion',
+    expansionPassed,
+    expansionPassed ? 'Legacy expansion threshold passed; classify as FGD.' : 'Legacy expansion threshold not met; classify as FRD.',
+    [first.time, last.time]
+  );
+
+  const ruleEvaluations = [sourceRule, stopHuntRule, setup123Rule, emaRule, tierRule, classificationRule];
+
   const markers = [
-    { id: 'source', kind: 'source', ruleName: 'source', reasoning: 'Source candle selected from revealed data only.', price: hos, time: first.time },
-    { id: 'entry', kind: 'entry', ruleName: 'entry', reasoning: 'Entry at latest revealed close.', price: entry, time: last.time },
-    { id: 'stop', kind: 'stop', ruleName: 'stop', reasoning: 'Stop placed below revealed LOD.', price: stop, time: last.time },
-    { id: 'tp30', kind: 'tp30', ruleName: 'TP30', reasoning: '30% target tier from revealed risk.', price: entry + risk * 0.3, time: last.time },
-    { id: 'tp35', kind: 'tp35', ruleName: 'TP35', reasoning: '35% target tier from revealed risk.', price: entry + risk * 0.35, time: last.time },
-    { id: 'tp40', kind: 'tp40', ruleName: 'TP40', reasoning: '40% target tier from revealed risk.', price: entry + risk * 0.4, time: last.time },
-    { id: 'tp50', kind: 'tp50', ruleName: 'TP50', reasoning: '50% target tier from revealed risk.', price: entry + risk * 0.5, time: last.time }
+    { id: 'source', kind: 'source', ruleId: sourceRule.id, ruleName: 'source', reasoning: sourceRule.reason, price: hos, time: first.time },
+    { id: 'entry', kind: 'entry', ruleId: emaRule.id, ruleName: 'entry', reasoning: `Entry at latest revealed close (${emaRule.reason})`, price: entry, time: last.time },
+    { id: 'stop', kind: 'stop', ruleId: stopHuntRule.id, ruleName: 'stop', reasoning: 'Stop placed below revealed LOD.', price: stop, time: last.time },
+    { id: 'tp30', kind: 'tp30', ruleId: tierRule.id, ruleName: 'TP30', reasoning: tierRule.reason, price: entry + risk * 0.3, time: last.time },
+    { id: 'tp35', kind: 'tp35', ruleId: tierRule.id, ruleName: 'TP35', reasoning: tierRule.reason, price: entry + risk * 0.35, time: last.time },
+    { id: 'tp40', kind: 'tp40', ruleId: tierRule.id, ruleName: 'TP40', reasoning: tierRule.reason, price: entry + risk * 0.4, time: last.time },
+    { id: 'tp50', kind: 'tp50', ruleId: tierRule.id, ruleName: 'TP50', reasoning: tierRule.reason, price: entry + risk * 0.5, time: last.time }
   ];
 
   return {
-    explain: ['FGD / FRD check complete on revealed candles.', 'Rule-traceable overlays drawn on visible chart only.'],
+    explain: ruleEvaluations.map((rule) => `${rule.id}: ${rule.reason}`),
+    ruleEvaluations,
     stage: 'stage-3-check',
-    validity: Math.abs(last.close - first.open) > 1 ? 'FGD' : 'FRD',
-    sourceReason: 'Selected from first revealed tradable candle.',
-    stopHuntReason: 'Stop anchored to revealed LOD for traceability.',
-    setup123Reason: '1-2-3 structure approximated from revealed range.',
-    entryReason: 'Replay entry set at active revealed candle close.',
-    targetTierReason: 'TP tiers map to configured risk fractions on revealed candles.',
+    validity: classificationRule.passed ? 'FGD' : 'FRD',
+    sourceReason: sourceRule.reason,
+    stopHuntReason: stopHuntRule.reason,
+    setup123Reason: setup123Rule.reason,
+    entryReason: emaRule.reason,
+    targetTierReason: tierRule.reason,
     overlays: { ema20, previousClose, hos, los, hod, lod },
     markers
   };
