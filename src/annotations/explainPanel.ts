@@ -1,11 +1,16 @@
-import { StrategyResult } from "../types.js";
+import { StrategyResult } from '../types.js';
 
 export function renderExplainPanel(container: HTMLElement, result: StrategyResult): void {
+  const ruleItems = result.ruleEvaluations
+    .map(
+      (rule) => `<li><strong>${rule.id}</strong>: ${rule.passed ? 'PASS' : 'FAIL'} — ${rule.reason} (evidence: ${rule.evidenceBars.join(', ') || 'n/a'})</li>`
+    )
+    .join('');
+
   container.innerHTML = `
     <h3>Explain Panel</h3>
     <ul>
       <li><strong>Validity:</strong> ${result.validity}</li>
-      <li><strong>Why:</strong> ${result.explain.join(" ")}</li>
       <li><strong>Current stage:</strong> ${result.stage}</li>
       <li><strong>Why source:</strong> ${result.sourceReason}</li>
       <li><strong>Why stop hunt:</strong> ${result.stopHuntReason}</li>
@@ -13,5 +18,7 @@ export function renderExplainPanel(container: HTMLElement, result: StrategyResul
       <li><strong>Why entry:</strong> ${result.entryReason}</li>
       <li><strong>Why current target tier:</strong> ${result.targetTierReason}</li>
     </ul>
+    <h4>Rule Evaluations</h4>
+    <ul>${ruleItems}</ul>
   `;
 }

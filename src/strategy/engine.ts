@@ -1,5 +1,5 @@
-import { Candle, StrategyMarker, StrategyResult } from '../types.js';
-import type { CandidateDate, InternalDayAnalysis, OhlcvBar, ReplyMode, StrategyLine } from '../types/domain.js';
+import { Candle, RuleEvaluation, StrategyMarker, StrategyResult } from '../types.js';
+import type { CandidateDate, InternalDayAnalysis, InternalRuleEvaluation, OhlcvBar, ReplyMode, StrategyLine } from '../types/domain.js';
 
 function ema(values: number[], period: number): number[] {
   const k = 2 / (period + 1);
@@ -12,7 +12,37 @@ function ema(values: number[], period: number): number[] {
   return out;
 }
 
+const createRule = (id: string, passed: boolean, reason: string, evidenceBars: string[]): RuleEvaluation => ({ id, passed, reason, evidenceBars });
+const createInternalRule = (id: string, passed: boolean, reason: string, evidenceBars: string[]): InternalRuleEvaluation => ({ id, passed, reason, evidenceBars });
+
+const findRule = (rules: RuleEvaluation[], id: string): RuleEvaluation => rules.find((rule) => rule.id === id) ?? createRule(id, false, 'Rule not evaluated.', []);
+
 export function runStrategy(candles: Candle[]): StrategyResult {
+  if (!candles.length) {
+    const emptyRules = [
+      createRule('source-selection', false, 'No candles available to select a source.', []),
+      createRule('stop-hunt', false, 'No range available to determine stop-hunt behavior.', []),
+      createRule('setup-123', false, 'Need at least 3 candles to validate 1-2-3 sequencing.', []),
+      createRule('ema-alignment', false, 'Need candles to compute EMA20 alignment.', []),
+      createRule('target-tier-upgrade', false, 'Need entry/stop to evaluate target tier upgrades.', []),
+      createRule('classification-expansion', false, 'No expansion without visible candles.', []),
+    ];
+
+    return {
+      explain: emptyRules.map((rule) => `${rule.id}: ${rule.reason}`),
+      ruleEvaluations: emptyRules,
+      stage: 'waiting-replay-start',
+      validity: 'not valid Day 3',
+      sourceReason: findRule(emptyRules, 'source-selection').reason,
+      stopHuntReason: findRule(emptyRules, 'stop-hunt').reason,
+      setup123Reason: findRule(emptyRules, 'setup-123').reason,
+      entryReason: 'Entry appears after revealed data exists.',
+      targetTierReason: findRule(emptyRules, 'target-tier-upgrade').reason,
+      overlays: { ema20: [], previousClose: 0, hos: 0, los: 0, hod: 0, lod: 0 },
+      markers: []
+    };
+  }
+
   const closes = candles.map((c) => c.close);
   const ema20 = ema(closes, 20);
   const first = candles[0];
@@ -26,25 +56,54 @@ export function runStrategy(candles: Candle[]): StrategyResult {
   const stop = lod;
   const risk = Math.max(0.01, entry - stop);
 
+  const sourceRule = createRule('source-selection', true, `Source fixed to first revealed candle at ${first.time}.`, [first.time]);
+  const stopHuntPassed = last.low <= lod || last.high >= hod;
+  const stopHuntRule = createRule('stop-hunt', stopHuntPassed, stopHuntPassed ? 'Latest bar probes the visible range boundary (stop-hunt proxy).' : 'Latest bar has not probed range boundary yet.', [last.time]);
+  const setup123Passed = candles.length >= 3;
+  const setup123Evidence = candles.slice(Math.max(0, candles.length - 3)).map((c) => c.time);
+  const setup123Rule = createRule('setup-123', setup123Passed, setup123Passed ? 'Three-step sequence available from latest revealed bars.' : 'Need at least three revealed bars for 1-2-3 structure.', setup123Evidence);
+  const emaAligned = entry >= (ema20[ema20.length - 1] ?? entry);
+  const emaRule = createRule('ema-alignment', emaAligned, emaAligned ? 'Close is on/above EMA20.' : 'Close is below EMA20.', [last.time]);
+
+  const tierRule = createRule(
+    'target-tier-upgrade',
+    risk > 0,
+    risk > 0 ? 'Risk is positive; TP tiers can be promoted from TP30 to TP50.' : 'Risk is zero; TP tiers remain disabled.',
+    [last.time]
+  );
+
+  // ambiguous rule: legacy behavior classified FGD/FRD from absolute expansion (> 1).
+  // We keep that legacy expansion threshold inside a dedicated rule to preserve behavior transparently.
+  const expansionPassed = Math.abs(last.close - first.open) > 1;
+  const classificationRule = createRule(
+    'classification-expansion',
+    expansionPassed,
+    expansionPassed ? 'Legacy expansion threshold passed; classify as FGD.' : 'Legacy expansion threshold not met; classify as FRD.',
+    [first.time, last.time]
+  );
+
+  const ruleEvaluations = [sourceRule, stopHuntRule, setup123Rule, emaRule, tierRule, classificationRule];
+
   const markers: StrategyMarker[] = [
-    { id: 'source', kind: 'source', ruleName: 'source', reasoning: 'Source candle selected from scan.', price: hos, time: first.time },
-    { id: 'entry', kind: 'entry', ruleName: 'entry', reasoning: 'Entry at latest close for replay.', price: entry, time: last.time },
-    { id: 'stop', kind: 'stop', ruleName: 'stop', reasoning: 'Stop placed below day low.', price: stop, time: last.time },
-    { id: 'tp30', kind: 'tp30', ruleName: 'TP30', reasoning: '30% target tier.', price: entry + risk * 0.3, time: last.time },
-    { id: 'tp35', kind: 'tp35', ruleName: 'TP35', reasoning: '35% target tier.', price: entry + risk * 0.35, time: last.time },
-    { id: 'tp40', kind: 'tp40', ruleName: 'TP40', reasoning: '40% target tier.', price: entry + risk * 0.4, time: last.time },
-    { id: 'tp50', kind: 'tp50', ruleName: 'TP50', reasoning: '50% target tier.', price: entry + risk * 0.5, time: last.time }
+    { id: 'source', kind: 'source', ruleId: sourceRule.id, ruleName: 'source', reasoning: sourceRule.reason, price: hos, time: first.time },
+    { id: 'entry', kind: 'entry', ruleId: emaRule.id, ruleName: 'entry', reasoning: `Entry at latest revealed close (${emaRule.reason})`, price: entry, time: last.time },
+    { id: 'stop', kind: 'stop', ruleId: stopHuntRule.id, ruleName: 'stop', reasoning: 'Stop placed below revealed LOD.', price: stop, time: last.time },
+    { id: 'tp30', kind: 'tp30', ruleId: tierRule.id, ruleName: 'TP30', reasoning: tierRule.reason, price: entry + risk * 0.3, time: last.time },
+    { id: 'tp35', kind: 'tp35', ruleId: tierRule.id, ruleName: 'TP35', reasoning: tierRule.reason, price: entry + risk * 0.35, time: last.time },
+    { id: 'tp40', kind: 'tp40', ruleId: tierRule.id, ruleName: 'TP40', reasoning: tierRule.reason, price: entry + risk * 0.4, time: last.time },
+    { id: 'tp50', kind: 'tp50', ruleId: tierRule.id, ruleName: 'TP50', reasoning: tierRule.reason, price: entry + risk * 0.5, time: last.time }
   ];
 
   return {
-    explain: ['FGD / FRD check complete.', 'Rule-traceable overlays drawn on chart.'],
+    explain: ruleEvaluations.map((rule) => `${rule.id}: ${rule.reason}`),
+    ruleEvaluations,
     stage: 'stage-3-check',
-    validity: Math.abs(last.close - first.open) > 1 ? 'FGD' : 'FRD',
-    sourceReason: 'Selected from first tradable candle.',
-    stopHuntReason: 'Stop anchored to LOD for traceability.',
-    setup123Reason: '1-2-3 structure approximated from day range.',
-    entryReason: 'Replay entry set at active candle close.',
-    targetTierReason: 'TP tiers map to configured risk fractions.',
+    validity: classificationRule.passed ? 'FGD' : 'FRD',
+    sourceReason: sourceRule.reason,
+    stopHuntReason: stopHuntRule.reason,
+    setup123Reason: setup123Rule.reason,
+    entryReason: emaRule.reason,
+    targetTierReason: tierRule.reason,
     overlays: { ema20, previousClose, hos, los, hod, lod },
     markers
   };
@@ -92,13 +151,15 @@ export const evaluateDay = (
   const last = dayBars[dayBars.length - 1];
 
   if (!first || !last) {
+    const rules = [createInternalRule('day-bars-available', false, 'No bars available for selected day.', [])];
     return {
       explain: {
         template: 'NONE',
         bias: 'NEUTRAL',
         stage: 'waiting-day-selection',
         missingConditions: ['No bars available for selected day'],
-        reasons: ['Day cannot be evaluated until bars exist'],
+        reasons: rules.map((rule) => `${rule.id}: ${rule.reason}`),
+        ruleEvaluations: rules,
         entryAllowed: false,
         targetTier: null,
       },
@@ -112,7 +173,21 @@ export const evaluateDay = (
   const lod = Math.min(...dayBars.map((bar) => bar.low));
   const hos = Math.max(...dayBars.map((bar) => bar.open));
   const los = Math.min(...dayBars.map((bar) => bar.open));
-  const entryAllowed = Math.abs(last.close - first.open) > 0;
+  const dayCloses = dayBars.map((bar) => bar.close);
+  const dayEma20 = ema(dayCloses, 20);
+
+  const sourceRule = createInternalRule('source-selection', true, `Source selected from first day bar ${first.time}.`, [first.time]);
+  const stopHuntRule = createInternalRule('stop-hunt', line === 'FGD' ? last.low <= lod : last.high >= hod, line === 'FGD' ? 'FGD path checks probe of day low boundary.' : 'FRD path checks probe of day high boundary.', [last.time]);
+  const setup123Rule = createInternalRule('setup-123', dayBars.length >= 3, dayBars.length >= 3 ? '1-2-3 structure candidate exists in day bars.' : 'Need 3+ bars to validate 1-2-3.', dayBars.slice(Math.max(0, dayBars.length - 3)).map((bar) => bar.time));
+  const emaRule = createInternalRule('ema-alignment', line === 'FGD' ? last.close >= (dayEma20[dayEma20.length - 1] ?? last.close) : last.close <= (dayEma20[dayEma20.length - 1] ?? last.close), line === 'FGD' ? 'FGD expects close on/above EMA20.' : 'FRD expects close on/below EMA20.', [last.time]);
+  const entryRule = createInternalRule('entry-eligibility', dayBars.length > 1 && setup123Rule.passed, dayBars.length > 1 && setup123Rule.passed ? 'Entry unlocked once sequence and bars are available.' : 'Entry blocked until sequence is complete.', [last.time]);
+  const tierRule = createInternalRule('target-tier-upgrade', entryRule.passed, entryRule.passed ? 'Tier upgrade enabled; current default tier is TP40.' : 'Tier upgrade disabled until entry is unlocked.', [last.time]);
+
+  // ambiguous rule: retain existing behavior where selected line remains the final template for the day evaluation.
+  const templateRule = createInternalRule('template-selection', true, `Template remains ${line} from pre-scan to preserve legacy behavior.`, [first.time, last.time]);
+
+  const ruleEvaluations = [sourceRule, stopHuntRule, setup123Rule, emaRule, entryRule, tierRule, templateRule];
+  const entryAllowed = entryRule.passed;
 
   const entry = replyMode === 'manual' && manualTrade.entry ? manualTrade.entry : last.close;
   const exit = replyMode === 'manual' && manualTrade.exit ? manualTrade.exit : last.close + (last.close - lod) * 0.4;
@@ -122,16 +197,17 @@ export const evaluateDay = (
       template: line,
       bias: line === 'FGD' ? 'LONG' : 'SHORT',
       stage: 'stage-3-check',
-      missingConditions: entryAllowed ? [] : ['No directional expansion'],
-      reasons: [`${line} day evaluation complete`],
+      missingConditions: ruleEvaluations.filter((rule) => !rule.passed).map((rule) => `${rule.id}: ${rule.reason}`),
+      reasons: ruleEvaluations.map((rule) => `${rule.id}: ${rule.reason}`),
+      ruleEvaluations,
       entryAllowed,
-      targetTier: entryAllowed ? 40 : null,
+      targetTier: tierRule.passed ? 40 : null,
     },
     annotations: [
-      { id: 'source', kind: 'source', barTime: first.time, price: line === 'FGD' ? los : hos, ruleName: 'source', reasoning: 'Source selected by line rules' },
-      { id: 'entry', kind: 'entry', barTime: last.time, price: entry, ruleName: 'entry', reasoning: 'Entry derived from reply mode' },
-      { id: 'stop', kind: 'stop', barTime: last.time, price: lod, ruleName: 'stop', reasoning: 'Stop uses day low/high guardrail' },
-      { id: 'tp40', kind: 'tp40', barTime: last.time, price: exit, ruleName: 'TP40', reasoning: 'Target tier currently set to 40' },
+      { id: 'source', kind: 'source', barTime: first.time, price: line === 'FGD' ? los : hos, ruleId: sourceRule.id, ruleName: 'source', reasoning: sourceRule.reason },
+      { id: 'entry', kind: 'entry', barTime: last.time, price: entry, ruleId: entryRule.id, ruleName: 'entry', reasoning: entryRule.reason },
+      { id: 'stop', kind: 'stop', barTime: last.time, price: lod, ruleId: stopHuntRule.id, ruleName: 'stop', reasoning: stopHuntRule.reason },
+      { id: 'tp40', kind: 'tp40', barTime: last.time, price: exit, ruleId: tierRule.id, ruleName: 'TP40', reasoning: tierRule.reason },
     ],
     previousClose,
     hos,

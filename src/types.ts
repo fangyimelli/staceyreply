@@ -25,14 +25,23 @@ export interface DetectedDate {
 export interface StrategyMarker {
   id: string;
   kind: "source" | "entry" | "stop" | "tp30" | "tp35" | "tp40" | "tp50";
+  ruleId: string;
   ruleName: string;
   reasoning: string;
   price: number;
   time: string;
 }
 
+export interface RuleEvaluation {
+  id: string;
+  passed: boolean;
+  reason: string;
+  evidenceBars: string[];
+}
+
 export interface StrategyResult {
   explain: string[];
+  ruleEvaluations: RuleEvaluation[];
   stage: string;
   validity: "FGD" | "FRD" | "not valid Day 3";
   sourceReason: string;
