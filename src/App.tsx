@@ -1,96 +1,13 @@
 import { useMemo, useState } from 'react';
-import { aggregateFrom1m, ema } from './aggregation/timeframe';
 import { sampleBars1m } from './data/sampleData';
 import { parseFile } from './parser/parseLocalData';
-import { detectCandidates, evaluateDay } from './strategy/engine';
-import type { DebugArtifacts, ReplyMode, ScreenedResultRow, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
+import { formatFrontendScreenedPayload } from './result/formatter';
+import type { FrontendScreenedPayload, ReplyMode, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
 import { formatDebugArtifacts, formatDebugPayload } from './ui/debugFormat';
 import { ExplainPanel } from './ui/ExplainPanel';
 
 const timeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
-
-const buildScreenedResults = (
-  datasets: SymbolDataset[],
-  lineFilter: { enableFGD: boolean; enableFRD: boolean },
-  replyMode: ReplyMode
-): { rows: ScreenedResultRow[]; debugArtifacts: DebugArtifacts } => {
-  const debugArtifacts: DebugArtifacts = {
-    rawScanTraces: [],
-    rejectedDates: [],
-    internalRuleStates: [],
-  };
-
-  const rows = datasets.flatMap((dataset) => {
-    const scanned = detectCandidates(dataset.symbol, dataset.bars1m);
-    debugArtifacts.rawScanTraces.push(...scanned);
-
-    return scanned.flatMap((candidate) => {
-      const lineEnabled = (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD);
-      if (!lineEnabled) {
-        debugArtifacts.rejectedDates.push({
-          symbol: dataset.symbol,
-          candidateDate: candidate.date,
-          lineType: candidate.type,
-          reason: `Filtered out: ${candidate.type} toggle is disabled`,
-        });
-        return [];
-      }
-
-      const dayEval = evaluateDay(candidate.type, aggregateFrom1m(dataset.bars1m, '5m'), candidate.date, replyMode, {
-        entry: 0,
-        exit: 0,
-      });
-
-      debugArtifacts.internalRuleStates.push({
-        symbol: dataset.symbol,
-        candidateDate: candidate.date,
-        lineType: candidate.type,
-        stage: dayEval.explain.stage,
-        entryAllowed: dayEval.explain.entryAllowed,
-        reasons: dayEval.explain.reasons,
-        missingConditions: dayEval.explain.missingConditions,
-      });
-
-      const replayAvailable = dayEval.explain.entryAllowed;
-      if (!replayAvailable) {
-        debugArtifacts.rejectedDates.push({
-          symbol: dataset.symbol,
-          candidateDate: candidate.date,
-          lineType: candidate.type,
-          reason: `Rule state rejected: ${dayEval.explain.missingConditions.join(', ') || 'entry not qualified yet'}`,
-        });
-      }
-
-      const validity: ScreenedResultRow['validity'] = replayAvailable ? 'pass' : 'fail';
-      return [{
-        symbol: dataset.symbol,
-        candidateDate: candidate.date,
-        lineType: candidate.type,
-        validity,
-        replayAvailable,
-        recommendedNextAction: replayAvailable
-          ? `Run ${replyMode === 'auto' ? 'Auto Reply' : 'Manual Reply'} replay`
-          : 'Skip until setup conditions become valid',
-        currentTargetTier: dayEval.explain.targetTier,
-        debug: {
-          scanReason: candidate.reason,
-          rejectionReason: replayAvailable
-            ? undefined
-            : `Rule state rejected: ${dayEval.explain.missingConditions.join(', ') || 'entry not qualified yet'}`,
-          ruleState: {
-            stage: dayEval.explain.stage,
-            entryAllowed: dayEval.explain.entryAllowed,
-            reasons: dayEval.explain.reasons,
-            missingConditions: dayEval.explain.missingConditions,
-          },
-        },
-      }];
-    });
-  });
-
-  return { rows: rows.filter((row) => row.validity === 'pass'), debugArtifacts };
-};
 
 export default function App() {
   const [datasets, setDatasets] = useState<SymbolDataset[]>([{ symbol: 'SAMPLE', bars1m: sampleBars1m() }]);
@@ -107,28 +24,24 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [totalPnl, setTotalPnl] = useState(0);
 
-  const screenedState = useMemo(
-    () => buildScreenedResults(datasets, { enableFGD, enableFRD }, replyMode),
-    [datasets, enableFGD, enableFRD, replyMode]
+  const formatted = useMemo(
+    () =>
+      formatFrontendScreenedPayload({
+        datasets,
+        lineFilter: { enableFGD, enableFRD },
+        replyMode,
+        symbol,
+        timeframe: tf,
+        line,
+        practiceOnly,
+        selectedDate,
+        manualTrade: { entry: Number(manualEntry), exit: Number(manualExit) },
+      }),
+    [datasets, enableFGD, enableFRD, replyMode, symbol, tf, line, practiceOnly, selectedDate, manualEntry, manualExit]
   );
-  const screenedResults = screenedState.rows;
-
-  const active = datasets.find((d) => d.symbol === symbol) ?? datasets[0];
-  const bars = useMemo(() => aggregateFrom1m(active.bars1m, tf), [active.bars1m, tf]);
-
-  const dayChoices = useMemo(() => {
-    const all = [...new Set(bars.map((b) => b.time.slice(0, 10)))];
-    const filtered = screenedResults.filter((row) => row.symbol === symbol).map((row) => row.candidateDate);
-    return practiceOnly ? filtered : all;
-  }, [bars, screenedResults, symbol, practiceOnly]);
-
-  const day = selectedDate || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10);
-  const evalResult = useMemo(
-    () => evaluateDay(line, aggregateFrom1m(active.bars1m, '5m'), day, replyMode, { entry: Number(manualEntry), exit: Number(manualExit) }),
-    [line, active.bars1m, day, replyMode, manualEntry, manualExit]
-  );
-  const dayBars = bars.filter((b) => b.time.slice(0, 10) === day);
-  const ema20 = ema(dayBars, 20);
+  const uiPayload: FrontendScreenedPayload = formatted.payload;
+  const screenedResults = uiPayload.screenedResults;
+  const day = uiPayload.selectedDay;
 
   const handleFiles = async (files: FileList | null) => {
     if (!files) return;
@@ -139,7 +52,7 @@ export default function App() {
   };
 
   const runTrade = () => {
-    if (evalResult.trade) setTotalPnl((v) => v + evalResult.trade!.pnlPips);
+    if (uiPayload.dayAnalysis.trade) setTotalPnl((v) => v + uiPayload.dayAnalysis.trade.pnlPips);
   };
 
   return (
@@ -155,8 +68,7 @@ export default function App() {
         <label><input type="checkbox" checked={enableFGD} onChange={(e) => setEnableFGD(e.target.checked)} />FGD on</label>
         <label><input type="checkbox" checked={enableFRD} onChange={(e) => setEnableFRD(e.target.checked)} />FRD on</label>
         <label><input type="checkbox" checked={practiceOnly} onChange={(e) => setPracticeOnly(e.target.checked)} />Practice mode (filtered dates only)</label>
-        <label><input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />Debug mode</label>
-        <select value={day} onChange={(e) => setSelectedDate(e.target.value)}>{dayChoices.map((d) => <option key={d}>{d}</option>)}</select>
+        <select value={day} onChange={(e) => setSelectedDate(e.target.value)}>{uiPayload.dayChoices.map((d) => <option key={d}>{d}</option>)}</select>
         <select value={replyMode} onChange={(e) => setReplyMode(e.target.value as ReplyMode)}><option value="auto">Auto Reply</option><option value="manual">Manual Reply</option></select>
         {replyMode === 'manual' && (
           <>
@@ -169,7 +81,7 @@ export default function App() {
 
       <section style={{ margin: '12px 0' }}>
         <h3>Screened Results (Final)</h3>
-        {screenedResults.filter((row) => row.symbol === symbol).length === 0 ? (
+        {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).length === 0 ? (
           <p>No final screened results passed for this symbol.</p>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -185,7 +97,7 @@ export default function App() {
               </tr>
             </thead>
             <tbody>
-              {screenedResults.filter((row) => row.symbol === symbol).map((row) => (
+              {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).map((row) => (
                 <tr key={`${row.symbol}-${row.candidateDate}-${row.lineType}`}>
                   <td>{row.symbol}</td>
                   <td>{row.candidateDate}</td>
@@ -223,17 +135,17 @@ export default function App() {
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1 }}>
           <ChartPanel
-            bars={dayBars}
-            ema20={ema20}
-            annotations={evalResult.annotations}
-            previousClose={evalResult.previousClose}
-            hos={evalResult.hos}
-            los={evalResult.los}
-            hod={evalResult.hod}
-            lod={evalResult.lod}
+            bars={uiPayload.dayBars}
+            ema20={uiPayload.ema20}
+            annotations={uiPayload.dayAnalysis.annotations}
+            previousClose={uiPayload.dayAnalysis.previousClose}
+            hos={uiPayload.dayAnalysis.hos}
+            los={uiPayload.dayAnalysis.los}
+            hod={uiPayload.dayAnalysis.hod}
+            lod={uiPayload.dayAnalysis.lod}
           />
         </div>
-        <ExplainPanel explain={evalResult.explain} trade={evalResult.trade} totalPnl={totalPnl} />
+        <ExplainPanel explain={uiPayload.dayAnalysis.explain} trade={uiPayload.dayAnalysis.trade} totalPnl={totalPnl} />
       </div>
     </div>
   );
