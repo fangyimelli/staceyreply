@@ -2,9 +2,10 @@
 
 - [x] Load local CSV / JSON OHLCV
 - [x] Load a folder of symbol files
-- [x] After upload, scan and filter FRD / FGD candidate dates first
-- [x] Show detected dates explicitly
-- [x] In practice mode, only show screened-passed dates
+- [x] Include built-in symbols/datasets for immediate use
+- [x] After upload, analyze and screen FRD / FGD candidate dates first
+- [x] Show detected final candidate dates explicitly
+- [x] In practice mode, only show filtered dates
 - [x] Auto Reply = automatic entry / exit + cumulative PnL
 - [x] Manual Reply = manual entry / exit + cumulative PnL
 - [x] Support 1m / 5m / 15m / 1h / 4h / 1D
@@ -12,6 +13,9 @@
 - [x] Use America/New_York timezone
 - [x] Main chart must be a real candlestick chart
 - [x] Candles must have uniform TradingView-like thickness and spacing
+- [x] Chart must clearly display date/time on the x-axis
+- [x] Chart must support mouse-wheel zoom like TradingView
+- [x] Chart must support drag/pan like TradingView
 - [x] Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50
 - [x] Right-side explain panel with rule-based reasoning
 - [x] Add expanded explanation documentation
@@ -19,13 +23,8 @@
 - [x] Replay Mode similar to TradingView Replay
 - [x] Replay starts from the day before the selected FRD/FGD date
 - [x] Replay can auto-stop at important market/strategy states
-- [x] On-chart state labels must show current status at each important step
+- [x] Replay must auto-pause at key moments and show on-chart state labels
+- [x] Frontend should display only final screened results by default
 - [x] README
 - [x] Sample mode
 - [x] Auto-generated acceptance checklist
-- [x] Built-in symbols/datasets included for immediate demo use
-- [x] Uploaded CSV/folder data is analyzed first and treated as the primary source for real analysis
-- [x] Internal pipeline stages are explicit: CSV parsing, timeframe rebuild, FRD/FGD screening, day-state classification, replay checkpoint generation, Auto/Manual state prep, final result packaging
-- [x] Normal mode shows only final screened results by default; intermediate raw internals are hidden
-- [x] Debug/developer mode exposes intermediate traces, rejected dates, and rule states
-- [x] Clear Normal mode vs Debug mode visibility boundaries are documented
