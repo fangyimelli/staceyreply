@@ -1,53 +1,46 @@
-# Stacey Burke / Sniper Day 3 Chart Reply (TypeScript SPA)
+# Stacey Reply Tool
 
-Single-page local web app that loads local OHLCV files, scans for FRD/FGD candidate Day 3 dates, displays chart annotations, and explains rule reasoning in a right-side panel.
+TypeScript single-page app for Day 3 replay practice with FRD/FGD scan-first workflow.
 
-## How to place CSV files
-1. Prepare local CSV with columns: `time,open,high,low,close,volume`.
-2. Or JSON arrays with equivalent fields.
-3. Start app and upload files with the file picker.
+## Confirmed Features
+1. Load local CSV / JSON OHLCV.
+2. Load a folder of symbol files.
+3. After upload, scan and filter FRD / FGD candidate dates first.
+4. Show detected dates explicitly.
+5. In practice mode, only show filtered dates.
+6. Auto Reply = automatic entry / exit + cumulative PnL.
+7. Manual Reply = manual entry / exit + cumulative PnL.
+8. Support 1m / 5m / 15m / 1h / 4h / 1D.
+9. Rebuild higher timeframes from 1m.
+10. Use America/New_York timezone.
+11. Main chart is a real candlestick chart for every supported timeframe.
+12. Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50.
+13. Marker hover tooltip includes rule name / reasoning / price / time.
+14. Right-side explain panel with rule-traceable reasoning.
+15. README maintained.
+16. Sample mode maintained.
+17. Auto-generated acceptance checklist maintained.
 
-## How to start
+## Layered Architecture
+- `src/parser` for CSV/JSON load.
+- `src/timeframe` for 1m aggregation and date scan.
+- `src/strategy` for rule outputs and PnL logic.
+- `src/annotations` for explain panel rendering.
+- `src/ui` for candlestick chart and overlays.
+
+## Run locally
 ```bash
+npm install
 npm run build
-python3 -m http.server 4173
+npm run start
 ```
 Open `http://localhost:4173`.
 
-## How to switch symbols
-- Upload one or more files.
-- Symbol is derived from filename and scanned for candidate dates.
-
-## How to switch timeframes
-- Use timeframe selector: `1m, 5m, 15m, 1h, 4h, 1D`.
-- 5m/15m/1h/4h/1D are rebuilt from 1m data.
-
-## How to use explain panel
-- Right-side panel shows:
-  - FGD/FRD classification
-  - current bias
-  - current stage
-  - missing conditions
-  - entry allowed or blocked
-  - current recommended 30/35/40/50 target tier
-
-## How to use Auto Reply
-- Set mode to `Auto Reply`.
-- Click `Apply trade to PnL` to accumulate auto trade result.
-
-## How to use Manual Reply
-- Set mode to `Manual Reply`.
-- Input entry and exit prices.
-- Click `Apply trade to PnL` to accumulate manual trade result.
-
-## Practice mode
-- Candidate dates are shown explicitly after scan.
-- Practice mode limits date choices to filtered candidate dates only.
-
 ## Sample mode
-- App boots with fake sample data so UI is immediately demonstrable before CSV upload.
+Use **Load Sample Mode** to load `sample/sample-1m.json`.
 
-## Generate acceptance checklist
+## Acceptance checklist
+Regenerate with:
 ```bash
-npm run checklist
+node scripts/generate-checklist.mjs
 ```
