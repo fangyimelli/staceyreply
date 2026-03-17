@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
-import { sampleBars1m } from './data/sampleData';
+import { useEffect, useMemo, useState } from 'react';
+import { sampleBars } from './data/sampleData';
 import { parseFile } from './parser/parseLocalData';
+import { parseFrdFgdWindows } from './parser/parseFrdFgdWindows';
 import { formatFrontendScreenedPayload } from './result/formatter';
 import type { FrontendScreenedPayload, ReplyMode, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
@@ -10,7 +11,7 @@ import { ExplainPanel } from './ui/ExplainPanel';
 const timeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
 
 export default function App() {
-  const [datasets, setDatasets] = useState<SymbolDataset[]>([{ symbol: 'SAMPLE', bars1m: sampleBars1m() }]);
+  const [datasets, setDatasets] = useState<SymbolDataset[]>([{ symbol: 'SAMPLE', bars1m: sampleBars() }]);
   const [symbol, setSymbol] = useState('SAMPLE');
   const [tf, setTf] = useState<Timeframe>('5m');
   const [line, setLine] = useState<StrategyLine>('FGD');
@@ -23,6 +24,24 @@ export default function App() {
   const [manualExit, setManualExit] = useState('');
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [totalPnl, setTotalPnl] = useState(0);
+
+  useEffect(() => {
+    const loadBuiltInWindows = async () => {
+      try {
+        const response = await fetch('/sample/frd_fgd_three_day_windows.csv');
+        if (!response.ok) return;
+        const csvText = await response.text();
+        const bars = parseFrdFgdWindows(csvText);
+        if (!bars.length) return;
+        setDatasets([{ symbol: 'FRD_FGD_BUILTIN', bars1m: bars }]);
+        setSymbol('FRD_FGD_BUILTIN');
+      } catch {
+        // Keep SAMPLE fallback dataset when built-in CSV is unavailable.
+      }
+    };
+
+    void loadBuiltInWindows();
+  }, []);
 
   const formatted = useMemo(
     () =>
@@ -117,11 +136,11 @@ export default function App() {
         <section style={{ margin: '12px 0', padding: 10, border: '1px solid #cbd5e1', background: '#f8fafc' }}>
           <h3>Debug Panel (Intermediate Artifacts)</h3>
           <h4>Raw Scan Traces</h4>
-          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rejectedDates: [], internalRuleStates: [] })}</pre>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ rawScanTraces: formatted.debug.candidatesBySymbol[symbol] ?? [], rejectedDates: [], internalRuleStates: [] })}</pre>
           <h4>Rejected Dates</h4>
-          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rawScanTraces: [], internalRuleStates: [] })}</pre>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ rawScanTraces: [], rejectedDates: [], internalRuleStates: [] })}</pre>
           <h4>Internal Rule States</h4>
-          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rawScanTraces: [], rejectedDates: [] })}</pre>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ rawScanTraces: [], rejectedDates: [], internalRuleStates: [] })}</pre>
           <h4>Passed Rows (Debug Payload)</h4>
           {screenedResults.filter((row) => row.symbol === symbol).map((row) => (
             <pre key={`debug-${row.symbol}-${row.candidateDate}-${row.lineType}`} style={{ whiteSpace: 'pre-wrap' }}>
