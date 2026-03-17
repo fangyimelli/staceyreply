@@ -66,7 +66,7 @@ function render() {
     replayCursor: replay.cursor,
     visibleCount: visibleCandles.length
   });
-  renderCandlestickChart(canvas, visibleCandles, result, tooltip);
+  renderCandlestickChart(canvas, visibleCandles, result, tooltip, tf);
 
   if (modeEl.value === 'auto') {
     const auto = computeAutoReplayPnl(result);
