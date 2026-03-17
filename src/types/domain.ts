@@ -59,6 +59,35 @@ export interface ScreenedResultRow {
   replayAvailable: boolean;
   recommendedNextAction: string;
   currentTargetTier: 30 | 35 | 40 | 50 | null;
+  debug?: ScreenedResultDebugPayload;
+}
+export interface ScreenedResultDebugPayload {
+  scanReason: string;
+  rejectionReason?: string;
+  ruleState?: {
+    stage: string;
+    entryAllowed: boolean;
+    reasons: string[];
+    missingConditions: string[];
+  };
+}
+export interface DebugArtifacts {
+  rawScanTraces: CandidateDate[];
+  rejectedDates: Array<{
+    symbol: string;
+    candidateDate: string;
+    lineType: StrategyLine;
+    reason: string;
+  }>;
+  internalRuleStates: Array<{
+    symbol: string;
+    candidateDate: string;
+    lineType: StrategyLine;
+    stage: string;
+    entryAllowed: boolean;
+    reasons: string[];
+    missingConditions: string[];
+  }>;
 }
 
 export interface FrontendScreenedPayload {

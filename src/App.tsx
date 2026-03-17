@@ -4,6 +4,7 @@ import { parseFile } from './parser/parseLocalData';
 import { formatFrontendScreenedPayload } from './result/formatter';
 import type { FrontendScreenedPayload, ReplyMode, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
+import { formatDebugArtifacts, formatDebugPayload } from './ui/debugFormat';
 import { ExplainPanel } from './ui/ExplainPanel';
 
 const timeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
@@ -17,6 +18,7 @@ export default function App() {
   const [enableFRD, setEnableFRD] = useState(true);
   const [practiceOnly, setPracticeOnly] = useState(true);
   const [replyMode, setReplyMode] = useState<ReplyMode>('auto');
+  const [debugMode, setDebugMode] = useState(false);
   const [manualEntry, setManualEntry] = useState('');
   const [manualExit, setManualExit] = useState('');
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -110,6 +112,25 @@ export default function App() {
           </table>
         )}
       </section>
+
+      {debugMode && (
+        <section style={{ margin: '12px 0', padding: 10, border: '1px solid #cbd5e1', background: '#f8fafc' }}>
+          <h3>Debug Panel (Intermediate Artifacts)</h3>
+          <h4>Raw Scan Traces</h4>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rejectedDates: [], internalRuleStates: [] })}</pre>
+          <h4>Rejected Dates</h4>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rawScanTraces: [], internalRuleStates: [] })}</pre>
+          <h4>Internal Rule States</h4>
+          <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ ...screenedState.debugArtifacts, rawScanTraces: [], rejectedDates: [] })}</pre>
+          <h4>Passed Rows (Debug Payload)</h4>
+          {screenedResults.filter((row) => row.symbol === symbol).map((row) => (
+            <pre key={`debug-${row.symbol}-${row.candidateDate}-${row.lineType}`} style={{ whiteSpace: 'pre-wrap' }}>
+              {row.symbol} {row.candidateDate} {row.lineType}{'\n'}
+              {formatDebugPayload(row.debug)}
+            </pre>
+          ))}
+        </section>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1 }}>

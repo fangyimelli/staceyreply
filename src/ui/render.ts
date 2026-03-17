@@ -1,5 +1,5 @@
 import { ema20 } from '../aggregation/timeframe.js';
-import type { Annotation, ExplainState, OhlcvBar } from '../types/domain.js';
+import type { Annotation, DebugArtifacts, ExplainState, OhlcvBar } from '../types/domain.js';
 
 const color: Record<string,string>={source:'#f59e0b',stopHunt:'#ef4444',point1:'#22c55e',point2:'#14b8a6',point3:'#0ea5e9',emaConfirm:'#a855f7',entry:'#4f46e5',stop:'#dc2626',tp30:'#16a34a',tp35:'#15803d',tp40:'#166534',tp50:'#14532d'};
 
@@ -22,4 +22,13 @@ export const bindAnnotationTooltip = (canvas: HTMLCanvasElement, bars: OhlcvBar[
 
 export const renderExplain = (el: HTMLElement, explain: ExplainState, pnl: number) => {
   el.innerHTML = `<h3>Explain Panel</h3><p>classification: ${explain.template}</p><p>current bias: ${explain.bias}</p><p>current stage: ${explain.stage}</p><p>entry allowed: ${explain.entryAllowed}</p><p>recommended target: ${explain.target ?? 'none'} pips</p><h4>why</h4><ul>${explain.reasons.map((r)=>`<li>${r}</li>`).join('')}</ul><h4>missing conditions</h4><ul>${explain.missing.map((m)=>`<li>${m}</li>`).join('')}</ul><p><b>Total PnL:</b> ${pnl.toFixed(1)} pips</p>`;
+};
+
+
+export const renderDebugArtifacts = (el: HTMLElement, debugMode: boolean, artifacts?: DebugArtifacts) => {
+  if (!debugMode || !artifacts) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = `<h3>Debug Panel (Intermediate Artifacts)</h3><pre>${JSON.stringify(artifacts, null, 2)}</pre>`;
 };
