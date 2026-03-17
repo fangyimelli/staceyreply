@@ -6,8 +6,8 @@
   "scripts": {
     "build": "echo 'JS runtime files are committed in src/*.js; TypeScript source in src/*.ts'",
     "check": "echo 'TypeScript check skipped: npm registry access blocked in this environment'",
-    "dev": "python3 -m http.server 4173",
-    "start": "python3 -m http.server 4173",
-    "preview": "python3 -m http.server 4173"
+    "dev": "node scripts/dev-server.mjs",
+    "start": "node scripts/dev-server.mjs",
+    "preview": "node scripts/dev-server.mjs"
   }
 }
