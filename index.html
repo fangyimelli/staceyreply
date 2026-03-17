@@ -4,53 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Stacey Reply Tool</title>
-  <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <h1>Day 3 Reply Tool (America/New_York)</h1>
-  <section class="controls">
-    <input id="fileInput" type="file" multiple accept=".csv,.json" />
-    <button id="sampleBtn">Load Sample Mode</button>
-    <select id="timeframe">
-      <option>1m</option><option>5m</option><option>15m</option><option>1h</option><option>4h</option><option>1D</option>
-    </select>
-    <select id="mode">
-      <option value="practice">practice</option>
-      <option value="auto">auto</option>
-      <option value="manual">manual</option>
-    </select>
-    <select id="candidateDate"></select>
-    <button id="jumpDateBtn">Jump Day 3 Start</button>
-    <button id="jumpSessionBtn">Jump Session Start</button>
-  </section>
-
-  <section class="controls replay-controls">
-    <button id="playBtn">Play</button>
-    <button id="pauseBtn">Pause</button>
-    <button id="stepBackBtn">Step -1 bar</button>
-    <button id="stepForwardBtn">Step +1 bar</button>
-    <label>Speed
-      <select id="replaySpeed">
-        <option value="2000">0.5x</option>
-        <option value="1000">1x</option>
-        <option value="500" selected>2x</option>
-        <option value="250">4x</option>
-        <option value="100">10x</option>
-      </select>
-    </label>
-    <button id="setManualEntryBtn">Set Manual Entry @ Current Close</button>
-    <button id="setManualExitBtn">Set Manual Exit @ Current Close</button>
-    <button id="revealAnswerBtn">Reveal Answer (Manual)</button>
-  </section>
-
-  <div id="dates" class="dates"></div>
-  <div id="replayProgress" class="progress"></div>
-  <div class="layout">
-    <canvas id="chart" width="1000" height="460"></canvas>
-    <aside id="explain"></aside>
-  </div>
-  <div id="pnl"></div>
-  <div id="tooltip" class="tooltip"></div>
-  <script type="module" src="./src/app.js"></script>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

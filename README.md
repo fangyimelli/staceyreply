@@ -37,7 +37,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:4173`.
+Open `http://127.0.0.1:4173`.
 
 > You can also build and serve static output:
 >
@@ -448,6 +448,12 @@ When state transitions look wrong:
 - Core rule implementation should remain traceable to existing strategy logic and explicit user confirmations.
 - Documentation/extensions in this README are user-confirmed requirements for explanation/debug clarity.
 - If a rule is ambiguous, preserve existing behavior and annotate clearly in code comments (per project constraints).
+
+### Current Runtime Entry
+- Runtime track: **TypeScript + React (Vite)**.
+- HTML entrypoint: `index.html` mounting `<div id="root"></div>`.
+- Application bootstrap: `src/main.tsx` (renders `src/App.tsx`).
+- Legacy plain-JS runtime entry (`src/app.js` + related JS modules) has been removed to avoid dual-track drift.
 
 ### Confirmed Features
 Only explicitly confirmed features are listed below:

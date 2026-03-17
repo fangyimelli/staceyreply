@@ -1,4 +1,4 @@
-import type { OhlcvBar, Timeframe } from '../types/domain.js';
+import type { OhlcvBar, Timeframe } from '../types/domain';
 
 const key = (t: string, tf: Timeframe): string => {
   const d = new Date(t);
