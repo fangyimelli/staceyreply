@@ -20,6 +20,7 @@ export interface DetectedDate {
   rule: "FGD" | "FRD";
   reason: string;
   needsPractice: boolean;
+  practiceReason: string;
 }
 
 export interface StrategyMarker {
