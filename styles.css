@@ -1,0 +1,7 @@
+body { font-family: Arial, sans-serif; margin: 12px; background: #111827; color: #e5e7eb; }
+.controls { display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px; }
+.layout { display:grid; grid-template-columns: 1fr 320px; gap:12px; }
+#chart { border:1px solid #334155; background:#0b1220; }
+#explain { border:1px solid #334155; padding:10px; background:#0f172a; }
+.dates { margin: 8px 0; color: #93c5fd; }
+.tooltip { position:absolute; display:none; background:#1f2937; border:1px solid #6b7280; color:#f9fafb; padding:6px; font-size:12px; pointer-events:none; z-index:99; }

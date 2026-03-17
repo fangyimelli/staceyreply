@@ -301,7 +301,7 @@ Only explicitly confirmed features are listed below:
 ## Acceptance Checklist Generator
 
 ```bash
-npm run checklist
+node scripts/generate-checklist.mjs
 ```
 
 Generates/updates `ACCEPTANCE_CHECKLIST.md` from current confirmed feature scope.
