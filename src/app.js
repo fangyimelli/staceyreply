@@ -4,7 +4,7 @@ import { runStrategy } from './strategy/engine.js';
 import { aggregateFrom1m } from './timeframe/aggregate.js';
 import { scanCandidateDates } from './timeframe/dateScan.js';
 import { renderCandlestickChart } from './ui/chart.js';
-import { clampCursor, createReplayState, getVisibleCandles, jumpToDateStart, jumpToSessionStart } from './replay/replayState.js';
+import { clampCursor, createReplayState, detectReplayCheckpoint, getVisibleCandles, jumpToDateStart, jumpToSessionStart, replayCheckpoint } from './replay/replayState.js';
 import { computeAutoReplayPnl, computeManualReplayPnl } from './simulation/tradeReplay.js';
 
 const timeframeEl = document.querySelector('#timeframe');
@@ -28,6 +28,7 @@ const speedEl = document.querySelector('#replaySpeed');
 const revealAnswerBtn = document.querySelector('#revealAnswerBtn');
 const manualEntryBtn = document.querySelector('#setManualEntryBtn');
 const manualExitBtn = document.querySelector('#setManualExitBtn');
+const autoStopCheckpointEl = document.querySelector('#autoStopCheckpoint');
 
 let datasets = [];
 let fullCandles = [];
@@ -37,6 +38,8 @@ let replayTimer = null;
 let revealManualAnswer = false;
 let manualState = { entryPrice: null, exitPrice: null };
 
+if (autoStopCheckpointEl) autoStopCheckpointEl.checked = replay.autoStopCheckpointEnabled;
+
 function stopPlayback() {
   replay.isPlaying = false;
   if (replayTimer) {
@@ -45,7 +48,7 @@ function stopPlayback() {
   }
 }
 
-function render() {
+function render(checkpointOverride = null) {
   if (!datasets.length) return;
 
   const tf = timeframeEl.value;
@@ -60,13 +63,16 @@ function render() {
   replay.cursor = clampCursor(replay.cursor, fullCandles.length);
   const visibleCandles = getVisibleCandles(fullCandles, replay.cursor);
   const result = runStrategy(visibleCandles);
+  const checkpoint = checkpointOverride ?? detectReplayCheckpoint(visibleCandles, replay.lastCheckpoint);
+  replay.lastCheckpoint = checkpoint.checkpoint;
 
   renderExplainPanel(explainEl, result, {
     revealAnswer: modeEl.value === 'manual' && revealManualAnswer,
     replayCursor: replay.cursor,
-    visibleCount: visibleCandles.length
+    visibleCount: visibleCandles.length,
+    checkpoint
   });
-  renderCandlestickChart(canvas, visibleCandles, result, tooltip);
+  renderCandlestickChart(canvas, visibleCandles, result, tooltip, checkpoint);
 
   if (modeEl.value === 'auto') {
     const auto = computeAutoReplayPnl(result);
@@ -95,7 +101,13 @@ function play() {
       return;
     }
     replay.cursor += 1;
-    render();
+    const visibleCandles = getVisibleCandles(fullCandles, replay.cursor);
+    const checkpoint = detectReplayCheckpoint(visibleCandles, replay.lastCheckpoint);
+    replay.lastCheckpoint = checkpoint.checkpoint;
+    render(checkpoint);
+    if (replay.autoStopCheckpointEnabled && checkpoint.hit) {
+      stopPlayback();
+    }
   }, replay.speedMs);
 }
 
@@ -104,6 +116,7 @@ async function loadSample() {
   const candles = await resp.json();
   datasets = [{ symbol: 'SAMPLE', candles1m: candles, sourceName: 'sample-1m.json' }];
   replay.cursor = 0;
+  replay.lastCheckpoint = replayCheckpoint.none;
   manualState = { entryPrice: null, exitPrice: null };
   render();
 }
@@ -122,6 +135,7 @@ fileEl.addEventListener('change', async () => {
   stopPlayback();
   datasets = await parseFiles(fileEl.files);
   replay.cursor = 0;
+  replay.lastCheckpoint = replayCheckpoint.none;
   manualState = { entryPrice: null, exitPrice: null };
   render();
 });
@@ -129,6 +143,7 @@ fileEl.addEventListener('change', async () => {
 timeframeEl.addEventListener('change', () => {
   stopPlayback();
   replay.cursor = 0;
+  replay.lastCheckpoint = replayCheckpoint.none;
   render();
 });
 modeEl.addEventListener('change', render);
@@ -161,5 +176,8 @@ revealAnswerBtn.addEventListener('click', () => {
 });
 manualEntryBtn.addEventListener('click', () => setManualFromCurrent('entry'));
 manualExitBtn.addEventListener('click', () => setManualFromCurrent('exit'));
+autoStopCheckpointEl?.addEventListener('change', () => {
+  replay.autoStopCheckpointEnabled = autoStopCheckpointEl.checked;
+});
 
 void loadSample();

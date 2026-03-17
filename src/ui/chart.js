@@ -1,6 +1,6 @@
 const markerColor = { source: '#2563eb', entry: '#16a34a', stop: '#dc2626', tp30: '#9333ea', tp35: '#a855f7', tp40: '#c026d3', tp50: '#db2777' };
 
-export function renderCandlestickChart(canvas, candles, result, tooltip) {
+export function renderCandlestickChart(canvas, candles, result, tooltip, checkpoint = null) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const w = canvas.width, h = canvas.height, pad = 40;
@@ -8,6 +8,13 @@ export function renderCandlestickChart(canvas, candles, result, tooltip) {
   ctx.fillStyle = '#0b1220';
   ctx.fillRect(0, 0, w, h);
   if (!candles.length) return;
+
+
+  if (checkpoint?.label) {
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = '14px sans-serif';
+    ctx.fillText(`Checkpoint: ${checkpoint.label}`, pad, 24);
+  }
 
   const maxPrice = Math.max(...candles.map((c) => c.high), result.overlays.hod, ...result.markers.map((m) => m.price));
   const minPrice = Math.min(...candles.map((c) => c.low), result.overlays.lod, ...result.markers.map((m) => m.price));
