@@ -1,158 +1,85 @@
-import {
-  Bar,
-  ComposedChart,
-  Customized,
-  Line,
-  ReferenceLine,
-  ResponsiveContainer,
-  Scatter,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-import type { Annotation, OhlcvBar } from '../types/domain';
+import { Bar, ComposedChart, Customized, Line, ReferenceLine, ResponsiveContainer, Scatter, Tooltip, XAxis, YAxis } from 'recharts';
 import { annotationColor } from '../annotations/palette';
+import type { Annotation, OhlcvBar, RuleTraceItem } from '../types/domain';
 import { toNyLabel } from '../strategy/engine';
 
 interface Props {
   bars: OhlcvBar[];
   ema20: number[];
   annotations: Annotation[];
+  replayMarkerTime?: string;
   previousClose?: number;
   hos?: number;
   los?: number;
   hod?: number;
   lod?: number;
-  emptyStateTitle?: string;
-  emptyStateBody?: string;
+  statusBanner: string;
 }
 
-interface ChartRow extends OhlcvBar {
-  index: number;
-  label: string;
-  ema20: number;
-  wickTop: number;
-}
+type ChartRow = OhlcvBar & { label: string; ema20: number; wickTop: number };
 
-const formatTraceMap = (trace?: Record<string, string | number>) => {
-  if (!trace) return [];
-  return Object.entries(trace).map(([key, value]) => `${key}: ${value}`);
-};
+const traceText = (trace: RuleTraceItem[]) => trace.map((item) => `${item.ruleName}: ${item.passed ? 'pass' : 'fail'} (${item.reason})`).join(' | ');
 
 const CandlestickLayer = ({ formattedGraphicalItems }: any) => {
   const points = formattedGraphicalItems?.[0]?.props?.points;
   if (!Array.isArray(points)) return null;
-
-  return (
-    <g>
-      {points.map((point: any) => {
-        const payload = point.payload as ChartRow;
-        const wickX = point.x + point.width / 2;
-        const openY = point.y;
-        const closeY = point.y + point.height;
-        const highY = point.yAxis.scale(payload.high);
-        const lowY = point.yAxis.scale(payload.low);
-        const bullish = payload.close >= payload.open;
-        const bodyY = Math.min(openY, closeY);
-        const bodyHeight = Math.max(Math.abs(closeY - openY), 2);
-        const bodyWidth = Math.max(point.width * 0.72, 3);
-        const bodyX = wickX - bodyWidth / 2;
-        const fill = bullish ? '#16a34a' : '#dc2626';
-
-        return (
-          <g key={payload.time}>
-            <line x1={wickX} y1={highY} x2={wickX} y2={lowY} stroke="#334155" strokeWidth={1.2} />
-            <rect x={bodyX} y={bodyY} width={bodyWidth} height={bodyHeight} fill={fill} stroke={fill} rx={1} />
-          </g>
-        );
-      })}
-    </g>
-  );
+  return <g>{points.map((point: any) => {
+    const p = point.payload as ChartRow;
+    const x = point.x + point.width / 2;
+    const openY = point.yAxis.scale(p.open);
+    const closeY = point.yAxis.scale(p.close);
+    const highY = point.yAxis.scale(p.high);
+    const lowY = point.yAxis.scale(p.low);
+    const bodyY = Math.min(openY, closeY);
+    const bodyHeight = Math.max(2, Math.abs(closeY - openY));
+    const width = Math.max(3, point.width * 0.68);
+    const bullish = p.close >= p.open;
+    return <g key={p.time}><line x1={x} y1={highY} x2={x} y2={lowY} stroke="#64748b" /><rect x={x - width / 2} y={bodyY} width={width} height={bodyHeight} fill={bullish ? '#22c55e' : '#ef4444'} rx={1} /></g>;
+  })}</g>;
 };
 
-const CustomTooltip = ({ active, label, payload }: any) => {
+const CustomTooltip = ({ active, payload }: any) => {
   if (!active || !payload?.length) return null;
-  const annotationPoint = payload.find((entry: any) => entry?.payload?.annotation)?.payload?.annotation as Annotation | undefined;
-  const candlePoint = payload.find((entry: any) => entry?.payload?.open !== undefined)?.payload as ChartRow | undefined;
-
-  return (
-    <div style={{ background: '#fff', border: '1px solid #cbd5e1', padding: 10, maxWidth: 320 }}>
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>{annotationPoint ? annotationPoint.ruleName : `Bar ${label}`}</div>
-      {annotationPoint ? (
-        <>
-          <div>判斷依據: {annotationPoint.reasoning}</div>
-          <div>Price: {annotationPoint.price.toFixed(5)}</div>
-          <div>Time: {toNyLabel(annotationPoint.barTime)}</div>
-          {formatTraceMap(annotationPoint.tracePrices).map((item) => (
-            <div key={item}>{item}</div>
-          ))}
-          {formatTraceMap(annotationPoint.traceTimes).map((item) => (
-            <div key={item}>{item}</div>
-          ))}
-        </>
-      ) : candlePoint ? (
-        <>
-          <div>Time: {toNyLabel(candlePoint.time)}</div>
-          <div>O: {candlePoint.open.toFixed(5)}</div>
-          <div>H: {candlePoint.high.toFixed(5)}</div>
-          <div>L: {candlePoint.low.toFixed(5)}</div>
-          <div>C: {candlePoint.close.toFixed(5)}</div>
-          <div>20EMA: {candlePoint.ema20.toFixed(5)}</div>
-        </>
-      ) : null}
-    </div>
-  );
+  const candle = payload.find((item: any) => item?.payload?.open !== undefined)?.payload as ChartRow | undefined;
+  const annotation = payload.find((item: any) => item?.payload?.annotation)?.payload?.annotation as Annotation | undefined;
+  return <div className="tooltip-card">
+    <strong>{annotation?.label ?? candle?.label}</strong>
+    {annotation ? <>
+      <div>Rule: {annotation.label}</div>
+      <div>Reason: {annotation.reasoning}</div>
+      <div>Time: {toNyLabel(annotation.barTime)}</div>
+      <div>Price: {annotation.price.toFixed(4)}</div>
+      <div>Trace: {traceText(annotation.trace)}</div>
+    </> : candle ? <>
+      <div>{toNyLabel(candle.time)}</div>
+      <div>O {candle.open.toFixed(4)} H {candle.high.toFixed(4)} L {candle.low.toFixed(4)} C {candle.close.toFixed(4)}</div>
+      <div>20EMA {candle.ema20.toFixed(4)}</div>
+    </> : null}
+  </div>;
 };
 
-export function ChartPanel({ bars, ema20, annotations, previousClose, hos, los, hod, lod, emptyStateTitle, emptyStateBody }: Props) {
-  if (bars.length === 0) {
-    return (
-      <div style={{ minHeight: 560, border: '1px dashed #94a3b8', borderRadius: 8, padding: 20, background: '#f8fafc' }}>
-        <h3 style={{ marginTop: 0 }}>{emptyStateTitle ?? 'Replay chart unavailable'}</h3>
-        <p>{emptyStateBody ?? 'This dataset does not include replayable 1m bars, so the app only shows imported metadata.'}</p>
-      </div>
-    );
-  }
-
-  const data: ChartRow[] = bars.map((bar, index) => ({
-    ...bar,
-    index,
-    label: toNyLabel(bar.time),
-    ema20: ema20[index],
-    wickTop: bar.high,
-  }));
-  const annotationData = annotations.map((annotation) => ({
-    x: toNyLabel(annotation.barTime),
-    y: annotation.price,
-    annotation,
-    label: toNyLabel(annotation.barTime),
-    open: undefined,
-  }));
-
-  return (
-    <ResponsiveContainer width="100%" height={560}>
-      <ComposedChart data={data} margin={{ top: 16, right: 32, left: 8, bottom: 16 }}>
-        <XAxis dataKey="label" minTickGap={40} />
-        <YAxis domain={['auto', 'auto']} width={90} />
+export function ChartPanel({ bars, ema20, annotations, replayMarkerTime, previousClose, hos, los, hod, lod, statusBanner }: Props) {
+  const data: ChartRow[] = bars.map((bar, index) => ({ ...bar, label: String(index), ema20: ema20[index] ?? bar.close, wickTop: bar.high }));
+  const marker = replayMarkerTime ? bars.find((bar) => bar.time === replayMarkerTime) : undefined;
+  return <section className="chart-shell">
+    <div className="status-banner">{statusBanner}</div>
+    <div className="chart-stage-note">Replay marker: {replayMarkerTime ? toNyLabel(replayMarkerTime) : 'n/a'}</div>
+    <ResponsiveContainer width="100%" height={620}>
+      <ComposedChart data={data} margin={{ top: 12, right: 24, left: 8, bottom: 8 }}>
+        <XAxis dataKey="label" hide />
+        <YAxis domain={['auto', 'auto']} width={72} />
         <Tooltip content={<CustomTooltip />} />
         <Bar dataKey="wickTop" fill="transparent" isAnimationActive={false} />
         <Customized component={CandlestickLayer} />
-        <Line type="monotone" dataKey="ema20" stroke="#a855f7" dot={false} name="20EMA" isAnimationActive={false} />
-        {previousClose !== undefined && <ReferenceLine y={previousClose} stroke="#6366f1" label="previous close" />}
-        {hos !== undefined && <ReferenceLine y={hos} stroke="#ef4444" label="HOS" />}
-        {los !== undefined && <ReferenceLine y={los} stroke="#10b981" label="LOS" />}
-        {hod !== undefined && <ReferenceLine y={hod} stroke="#f97316" label="HOD" />}
-        {lod !== undefined && <ReferenceLine y={lod} stroke="#0ea5e9" label="LOD" />}
-        {annotations.map((annotation) => (
-          <Scatter
-            key={annotation.id}
-            name={annotation.ruleName}
-            data={annotationData.filter((item) => item.annotation.id === annotation.id)}
-            fill={annotationColor(annotation.kind)}
-            isAnimationActive={false}
-          />
-        ))}
+        <Line dataKey="ema20" dot={false} stroke="#a855f7" isAnimationActive={false} />
+        {previousClose !== undefined && <ReferenceLine y={previousClose} stroke="#818cf8" label="previous close" />}
+        {hos !== undefined && <ReferenceLine y={hos} stroke="#fb7185" label="HOS" />}
+        {los !== undefined && <ReferenceLine y={los} stroke="#34d399" label="LOS" />}
+        {hod !== undefined && <ReferenceLine y={hod} stroke="#f59e0b" label="HOD" />}
+        {lod !== undefined && <ReferenceLine y={lod} stroke="#38bdf8" label="LOD" />}
+        {marker && <ReferenceLine x={data.findIndex((row) => row.time === marker.time)} stroke="#f8fafc" label="replay" />}
+        {annotations.map((annotation) => <Scatter key={annotation.id} data={[{ x: data.findIndex((row) => row.time === annotation.barTime), y: annotation.price, annotation }]} fill={annotationColor(annotation.kind)} isAnimationActive={false} />)}
       </ComposedChart>
     </ResponsiveContainer>
-  );
+  </section>;
 }

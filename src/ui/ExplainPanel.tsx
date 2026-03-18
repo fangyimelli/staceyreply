@@ -1,127 +1,51 @@
-import type { ExplainState, Trade } from '../types/domain';
+import type { ReplayAnalysis } from '../types/domain';
 
-const renderEvidence = (prices: Record<string, number>, times: Record<string, string>) => {
-  const priceBits = Object.entries(prices).map(([key, value]) => `${key}=${value}`);
-  const timeBits = Object.entries(times).map(([key, value]) => `${key}=${value}`);
-  return [...priceBits, ...timeBits].join(', ');
-};
-
-export function ExplainPanel({ explain, trade, totalPnl }: { explain: ExplainState; trade?: Trade; totalPnl: number }) {
-  const canEnterReasons = explain.reasons.filter((reason) => /allow|qualified|passed|detected|aligned/i.test(reason));
-  const cannotEnterReasons = explain.missingConditions;
-
-  return (
-    <aside
-      style={{
-        width: 420,
-        padding: 12,
-        borderLeft: '1px solid #e2e8f0',
-        overflow: 'auto',
-      }}
-    >
-      <h3>Explain Panel</h3>
-      <p>
-        <strong>模板分類:</strong> {explain.template}
-      </p>
-      <p>
-        <strong>Bias:</strong> {explain.bias}
-      </p>
-      <p>
-        <strong>階段:</strong> {explain.stage}
-      </p>
-      <p>
-        <strong>可進/不可進:</strong> {explain.entryAllowed ? '可進' : '不可進'}
-      </p>
-      <p>
-        <strong>目前 target tier:</strong> {explain.targetTier ? `${explain.targetTier} pips` : 'none'}
-      </p>
-
-      <h4>可進原因</h4>
+export function ExplainPanel({ analysis }: { analysis: ReplayAnalysis }) {
+  const visibleEvents = analysis.eventLog.filter((event) => event.visibleFromIndex <= analysis.currentBarIndex);
+  return <aside className="explain-shell">
+    <h2>Explain Panel</h2>
+    <section>
+      <h3>Current Classification</h3>
       <ul>
-        {(canEnterReasons.length ? canEnterReasons : ['尚未達成可進條件']).map((reason) => (
-          <li key={reason}>{reason}</li>
-        ))}
+        <li>Template: {analysis.template}</li>
+        <li>Bias: {analysis.bias}</li>
+        <li>Stage: {analysis.stage}</li>
+        <li>Can enter: {analysis.canEnter ? 'Yes' : 'No'}</li>
+        <li>Quality: {analysis.quality}</li>
+        <li>Recommended target: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : 'n/a'}</li>
+        <li>lastReplyEval: {analysis.lastReplyEval.explanation}</li>
       </ul>
-
-      <h4>尚缺條件 / 不可進原因（僅列實際 entry gate）</h4>
+    </section>
+    <section>
+      <h3>Historical Reasoning Timeline</h3>
+      <ol>
+        {visibleEvents.map((event) => <li key={event.id}><strong>{event.title}</strong><div>{event.summary}</div><div>{event.detail}</div></li>)}
+      </ol>
+    </section>
+    <section>
+      <h3>Missing Conditions</h3>
       <ul>
-        {(cannotEnterReasons.length ? cannotEnterReasons : ['目前沒有缺失條件']).map((reason) => (
-          <li key={reason}>{reason}</li>
-        ))}
+        {(analysis.invalidReasons.length ? analysis.invalidReasons : analysis.missingConditions).map((item) => <li key={item}>{item}</li>)}
       </ul>
-
-      <h4>Rule-trace summary</h4>
+      <p>Next: {analysis.nextExpectation}</p>
+    </section>
+    <section>
+      <h3>Rule Trace</h3>
+      <div className="trace-list">{analysis.ruleTrace.map((trace, index) => <div key={`${trace.ruleName}-${index}`} className="trace-card">
+        <strong>{trace.ruleName}</strong>
+        <div>{trace.timeframe}</div>
+        <div>{trace.passed ? 'PASS' : 'FAIL'} — {trace.reason}</div>
+        <div>Prices: {Object.entries(trace.prices).map(([k, v]) => `${k}=${v}`).join(', ') || 'n/a'}</div>
+        <div>Times: {Object.entries(trace.times).map(([k, v]) => `${k}=${v}`).join(', ') || 'n/a'}</div>
+      </div>)}</div>
+    </section>
+    <section>
+      <h3>Diagnostics</h3>
       <ul>
-        {explain.reasons.map((reason) => (
-          <li key={reason}>{reason}</li>
-        ))}
+        <li>Status banner: {analysis.statusBanner}</li>
+        <li>Debug gate state: {analysis.stage}</li>
+        <li>Can reply: {analysis.lastReplyEval.canReply ? 'true' : 'false'}</li>
       </ul>
-
-      <h4>判斷依據明細</h4>
-      <ul>
-        {explain.evidenceDetails.map((detail) => (
-          <li key={detail}>{detail}</li>
-        ))}
-      </ul>
-
-      <h4>Intraday rule summary</h4>
-      <ul>
-        <li>
-          <strong>Source:</strong>{' '}
-          {explain.intraday?.source ? `${explain.intraday.source.barTime} @ ${explain.intraday.source.price}` : 'n/a'}
-        </li>
-        <li>
-          <strong>Stop hunt:</strong>{' '}
-          {explain.intraday?.stopHunt
-            ? `${explain.intraday.stopHunt.sweptLevel.barTime} @ ${explain.intraday.stopHunt.sweptLevel.price} → ${explain.intraday.stopHunt.reclaim.barTime} @ ${explain.intraday.stopHunt.reclaim.price}`
-            : 'n/a'}
-        </li>
-        <li>
-          <strong>123:</strong>{' '}
-          {explain.intraday?.pattern123
-            ? `1=${explain.intraday.pattern123.node1?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.node1?.price ?? 'n/a'}, 2=${explain.intraday.pattern123.node2?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.node2?.price ?? 'n/a'}, 3=${explain.intraday.pattern123.node3?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.node3?.price ?? 'n/a'}, breakout=${explain.intraday.pattern123.breakout?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.breakout?.price ?? 'n/a'}`
-            : 'n/a'}
-        </li>
-        <li>
-          <strong>20EMA confirm（輔助資訊）:</strong>{' '}
-          {explain.intraday?.emaConfirm ? `${explain.intraday.emaConfirm.barTime} @ ${explain.intraday.emaConfirm.price}` : 'pending / n/a'}
-        </li>
-        <li>
-          <strong>Move30:</strong> {explain.intraday ? `${explain.intraday.move30Pips.toFixed(1)} pips` : 'n/a'}
-        </li>
-        <li>
-          <strong>Rotation:</strong> {explain.intraday?.rotationTagged ? 'yes' : 'no'}
-        </li>
-        <li>
-          <strong>Engulfment:</strong> {explain.intraday?.engulfment ? 'yes' : 'no'}
-        </li>
-      </ul>
-
-      <h4>Target tiers</h4>
-      <ul>
-        {explain.targetAssessments.map((assessment) => (
-          <li key={assessment.tier}>
-            <strong>TP{assessment.tier}:</strong> {assessment.reached ? 'reached' : 'not yet'} — target={assessment.targetPrice.toFixed(5)} — {assessment.description}
-            {!assessment.reached && assessment.missing.length ? <div style={{ color: '#475569' }}>Missing: {assessment.missing.join(', ')}</div> : null}
-          </li>
-        ))}
-      </ul>
-
-      <h4>Rule Trace</h4>
-      <ul>
-        {explain.ruleTrace.map((item) => (
-          <li key={item.ruleId}>
-            <strong>{item.ruleId}</strong>: {item.passed ? 'PASS' : 'FAIL'} — {item.detail}
-            {renderEvidence(item.prices, item.times) ? <div style={{ color: '#475569' }}>{renderEvidence(item.prices, item.times)}</div> : null}
-          </li>
-        ))}
-      </ul>
-
-      <h4>PnL</h4>
-      {trade ? <p>Last trade {trade.side}: {trade.pnlPips.toFixed(1)} pips ({trade.mode})</p> : <p>No trade executed yet.</p>}
-      <p>
-        <strong>Total PnL:</strong> {totalPnl.toFixed(1)} pips
-      </p>
-    </aside>
-  );
+    </section>
+  </aside>;
 }

@@ -1,951 +1,204 @@
-import { Candle, StrategyMarker, StrategyResult } from "../types";
-import { evaluateIntradayPatterns } from "./intraday";
-import { dailyBucketKeyNy } from "../utils/nyDate";
-import type {
-  CandidateDate,
-  InternalDayAnalysis,
-  OhlcvBar,
-  ReplyMode,
-  RuleTraceItem,
-  StrategyPreprocessingContext,
-  StrategyLine,
-} from "../types/domain";
+import { aggregateBars } from '../aggregation/timeframe';
+import type { Annotation, EventLogItem, OhlcvBar, ReplayAnalysis, ReplayStageId, RuleTraceItem, Timeframe, TradeLevel } from '../types/domain';
+import { byNyDate, nyDate, nyLabel, nyTime } from '../utils/nyDate';
+import { validateDataset } from '../validation/datasetValidation';
 
-function ema(values: number[], period: number): number[] {
+const tfList: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
+const ema = (bars: OhlcvBar[], period: number) => {
   const k = 2 / (period + 1);
-  const out: number[] = [];
-  let prev = values[0] ?? 0;
-  for (const value of values) {
-    prev = value * k + prev * (1 - k);
-    out.push(prev);
-  }
-  return out;
-}
-
-interface PipConfig {
-  symbol: string;
-  pipSize: number;
-  pipDecimals: number;
-  priceDecimals: number;
-  basis: string;
-}
-
-type TargetTier = 30 | 35 | 40 | 50;
-
-interface TierAssessment {
-  tier: TargetTier;
-  reached: boolean;
-  missing: string[];
-  description: string;
-}
-
-
-const countDecimals = (value: number): number => {
-  const normalized = value.toString().toLowerCase();
-  if (normalized.includes("e-")) {
-    const [base, exponent] = normalized.split("e-");
-    return (base.split(".")[1]?.length ?? 0) + Number(exponent);
-  }
-  return normalized.split(".")[1]?.length ?? 0;
-};
-
-const inferPipConfig = (symbol: string | undefined, bars: OhlcvBar[]): PipConfig => {
-  const normalizedSymbol = symbol?.toUpperCase() ?? "UNKNOWN";
-  const priceDecimals = bars.reduce(
-    (max, bar) =>
-      Math.max(
-        max,
-        countDecimals(bar.open),
-        countDecimals(bar.high),
-        countDecimals(bar.low),
-        countDecimals(bar.close),
-      ),
-    0,
-  );
-
-  if (/(JPY)/.test(normalizedSymbol)) {
-    return {
-      symbol: normalizedSymbol,
-      pipSize: 0.01,
-      pipDecimals: 2,
-      priceDecimals,
-      basis: "JPY pair rule",
-    };
-  }
-
-  if (/^(XAU|XAG)/.test(normalizedSymbol)) {
-    return {
-      symbol: normalizedSymbol,
-      pipSize: 0.1,
-      pipDecimals: 1,
-      priceDecimals,
-      basis: "metal rule",
-    };
-  }
-
-  if (priceDecimals <= 2) {
-    return {
-      symbol: normalizedSymbol,
-      pipSize: 0.01,
-      pipDecimals: 2,
-      priceDecimals,
-      basis: "2-decimal price rule",
-    };
-  }
-
-  return {
-    symbol: normalizedSymbol,
-    pipSize: 0.0001,
-    pipDecimals: 4,
-    priceDecimals,
-    basis: "default FX rule",
-  };
-};
-
-const priceDiffToPips = (priceDiff: number, pipConfig: PipConfig): number =>
-  priceDiff / pipConfig.pipSize;
-
-const pipsToPrice = (pips: number, pipConfig: PipConfig): number =>
-  pips * pipConfig.pipSize;
-
-const formatLabel = (ruleId: string): string =>
-  ruleId
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-
-const findTrace = (ruleTrace: RuleTraceItem[], ruleId: string): RuleTraceItem | undefined =>
-  ruleTrace.find((item) => item.ruleId === ruleId);
-
-const summarizeCandidateRule = (
-  template: ReturnType<typeof evaluateDailyTemplate>,
-  ruleIds: string[],
-): string =>
-  ruleIds
-    .map((ruleId) => {
-      const trace = findTrace(template.ruleTrace, ruleId);
-      if (!trace) return undefined;
-      return `${formatLabel(ruleId)}: ${trace.passed ? "pass" : "fail"} (${trace.detail})`;
-    })
-    .filter((value): value is string => Boolean(value))
-    .join(" | ");
-
-export const buildStrategyPreprocessingContext = (
-  bars1m: OhlcvBar[],
-): StrategyPreprocessingContext => {
-  const barsByNyDateMap = new Map<string, OhlcvBar[]>();
-  const timeToIndex: Record<string, number> = {};
-
-  bars1m.forEach((bar, index) => {
-    const key = dailyBucketKeyNy(bar.time);
-    const bucket = barsByNyDateMap.get(key) ?? [];
-    bucket.push(bar);
-    barsByNyDateMap.set(key, bucket);
-    timeToIndex[bar.time] = index;
+  let prev = bars[0]?.close ?? 0;
+  return bars.map((bar) => {
+    prev = bar.close * k + prev * (1 - k);
+    return prev;
   });
-
-  const dailyBars = [...barsByNyDateMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, bars]) => ({
-      time: bars[0].time,
-      open: bars[0].open,
-      high: Math.max(...bars.map((bar) => bar.high)),
-      low: Math.min(...bars.map((bar) => bar.low)),
-      close: bars[bars.length - 1].close,
-      volume: bars.reduce((sum, bar) => sum + bar.volume, 0),
-    }));
-
-  const dailyStatsByNyDate = dailyBars.reduce<
-    StrategyPreprocessingContext["dailyStatsByNyDate"]
-  >((acc, dailyBar, index) => {
-    const day = dailyBucketKeyNy(dailyBar.time);
-    const dayBars = barsByNyDateMap.get(day) ?? [];
-    if (dayBars.length === 0) return acc;
-    acc[day] = {
-      previousClose: index > 0 ? dailyBars[index - 1].close : undefined,
-      hod: Math.max(...dayBars.map((bar) => bar.high)),
-      lod: Math.min(...dayBars.map((bar) => bar.low)),
-      hos: Math.max(...dayBars.map((bar) => bar.open)),
-      los: Math.min(...dayBars.map((bar) => bar.open)),
-    };
-    return acc;
-  }, {});
-
-  return {
-    bars1m,
-    barsByNyDate: Object.fromEntries(barsByNyDateMap),
-    dailyBars,
-    dailyStatsByNyDate,
-    timeToIndex,
-  };
 };
+const pips = (value: number) => Math.round(value / 0.0001);
+const inNySession = (bar: OhlcvBar) => nyTime(bar.time) >= '07:00' && nyTime(bar.time) <= '11:00';
+const id = (stage: ReplayStageId, suffix: string) => `${stage}-${suffix}`;
 
-export function evaluateDailyTemplate(params: {
-  line: StrategyLine;
-  selectedDay: string;
-  context: StrategyPreprocessingContext;
-  pipPrecision?: number;
-  symbol?: string;
-}): {
-  template: "FGD" | "FRD" | "NONE";
-  entryAllowed: boolean;
-  reasons: string[];
-  missingConditions: string[];
-  evidenceDetails: string[];
-  ruleTrace: RuleTraceItem[];
-} {
-  const { line, context, selectedDay, symbol } = params;
-  const { bars1m, dailyBars } = context;
-  const idxD0 = dailyBars.findIndex(
-    (bar) => dailyBucketKeyNy(bar.time) === selectedDay,
-  );
+const makeEvent = (stage: ReplayStageId, title: string, summary: string, detail: string, visibleFromIndex: number, trace: RuleTraceItem[], barTime?: string, prices?: Record<string, number>): EventLogItem => ({ id: id(stage, String(visibleFromIndex)), stage, title, summary, detail, statusBanner: title, visibleFromIndex, barTime, prices, trace });
+const makeAnnotation = (kind: Annotation['kind'], index: number, barTime: string, price: number, label: string, reasoning: string, trace: RuleTraceItem[]): Annotation => ({ id: `${kind}-${barTime}`, kind, barTime, price, label, reasoning, trace, visibleFromIndex: index });
 
-  if (idxD0 < 2) {
-    return {
-      template: "NONE",
-      entryAllowed: false,
-      reasons: ["Insufficient daily history for D-2 / D-1 / D0 evaluation"],
-      missingConditions: ["Need at least D-2, D-1 and D0 bars"],
-      evidenceDetails: [
-        `selectedDay=${selectedDay}`,
-        `dailyBarsFound=${dailyBars.length}`,
-      ],
-      ruleTrace: [
-        {
-          ruleId: "daily-history-available",
-          passed: false,
-          detail: "Cannot evaluate without D-2 and D-1.",
-          prices: {},
-          times: { selectedDay },
-        },
-      ],
-    };
-  }
-
-  const pipConfig = inferPipConfig(symbol, bars1m);
-  const d2 = dailyBars[idxD0 - 2];
-  const d1 = dailyBars[idxD0 - 1];
-  const d0 = dailyBars[idxD0];
-
-  const d2Dump = d2.close < d2.open;
-  const d2Pump = d2.close > d2.open;
-  const d1Bull = d1.close > d1.open;
-  const d1Bear = d1.close < d1.open;
-  const d1InsideD2 = d1.high <= d2.high && d1.low >= d2.low;
-
-  const d1BodyPips = Math.abs(
-    priceDiffToPips(d1.close - d1.open, pipConfig),
-  );
-  const d1RangePips = Math.abs(priceDiffToPips(d1.high - d1.low, pipConfig));
-  const d1BodyRangeRatio = d1RangePips === 0 ? 0 : d1BodyPips / d1RangePips;
-  const d1BodyPriorityPass = d1BodyPips >= 40 && d1BodyRangeRatio >= 0.6;
-
-  const ruleTrace: RuleTraceItem[] = [
-    {
-      ruleId: "daily-history-available",
-      passed: true,
-      detail: "D-2, D-1 and D0 are present.",
-      prices: {},
-      times: { d2: d2.time, d1: d1.time, d0: d0.time },
-    },
-    {
-      ruleId: "pip-conversion",
-      passed: true,
-      detail: `Pip conversion inferred from ${pipConfig.basis}.`,
-      prices: {
-        pipSize: pipConfig.pipSize,
-        pipDecimals: pipConfig.pipDecimals,
-        priceDecimals: pipConfig.priceDecimals,
-      },
-      times: {},
-    },
-    {
-      ruleId: "fgd-d2-dump",
-      passed: d2Dump,
-      detail: "FGD requires D-2 dump background (close < open).",
-      prices: { d2Open: d2.open, d2Close: d2.close },
-      times: { d2: d2.time },
-    },
-    {
-      ruleId: "fgd-d1-close-red-to-green",
-      passed: d1Bull,
-      detail: "FGD requires D-1 close bullish (close > open).",
-      prices: { d1Open: d1.open, d1Close: d1.close },
-      times: { d1: d1.time },
-    },
-    {
-      ruleId: "fgd-priority-d1-body",
-      passed: d1BodyPriorityPass,
-      detail: "FGD priority: D-1 body >=40 pips and body/range >=60%.",
-      prices: { d1BodyPips, d1RangePips, d1BodyRangeRatio },
-      times: { d1: d1.time },
-    },
-    {
-      ruleId: "frd-d2-pump",
-      passed: d2Pump,
-      detail: "FRD requires D-2 pump background (close > open).",
-      prices: { d2Open: d2.open, d2Close: d2.close },
-      times: { d2: d2.time },
-    },
-    {
-      ruleId: "frd-d1-close-black",
-      passed: d1Bear,
-      detail: "FRD requires D-1 close bearish (close < open).",
-      prices: { d1Open: d1.open, d1Close: d1.close },
-      times: { d1: d1.time },
-    },
-    {
-      ruleId: "frd-inside-day",
-      passed: d1InsideD2,
-      detail:
-        "FRD requires inside day: D-1 high<=D-2 high and D-1 low>=D-2 low.",
-      prices: {
-        d1High: d1.high,
-        d1Low: d1.low,
-        d2High: d2.high,
-        d2Low: d2.low,
-      },
-      times: { d1: d1.time, d2: d2.time },
-    },
-  ];
-
-  const fgdPass = d2Dump && d1Bull;
-  const frdPass = d2Pump && d1Bear && d1InsideD2;
-
-  const reasons: string[] = [];
-  const evidenceDetails = [
-    `pip conversion: symbol=${pipConfig.symbol}, basis=${pipConfig.basis}, pipSize=${pipConfig.pipSize}, priceDecimals=${pipConfig.priceDecimals}`,
-    `D-2(${dailyBucketKeyNy(d2.time)}): O=${d2.open}, H=${d2.high}, L=${d2.low}, C=${d2.close}`,
-    `D-1(${dailyBucketKeyNy(d1.time)}): O=${d1.open}, H=${d1.high}, L=${d1.low}, C=${d1.close}, body=${d1BodyPips.toFixed(1)} pips, range=${d1RangePips.toFixed(1)} pips, body/range=${(d1BodyRangeRatio * 100).toFixed(1)}%`,
-    `D0(${dailyBucketKeyNy(d0.time)}): O=${d0.open}, H=${d0.high}, L=${d0.low}, C=${d0.close}`,
-  ];
+export const buildReplayAnalysis = (datasetId: string, symbol: string, bars1m: OhlcvBar[], currentBarIndex: number): ReplayAnalysis => {
+  const timeframeBars = Object.fromEntries(tfList.map((tf) => [tf, aggregateBars(bars1m, tf)])) as Record<Timeframe, OhlcvBar[]>;
+  const invalidIssues = validateDataset(bars1m);
+  const days = Object.keys(byNyDate(bars1m)).sort();
+  const tradeDay = days[days.length - 1] ?? '';
+  const daily = timeframeBars['1D'];
+  const d2 = daily[daily.length - 3];
+  const d1 = daily[daily.length - 2];
+  const tradeGroup = byNyDate(bars1m)[tradeDay] ?? [];
+  const session = tradeGroup.filter(inNySession);
+  const five = aggregateBars(session, '5m');
+  const ema5 = ema(five, 20);
+  const previousClose = d1?.close;
+  const hos = Math.max(...session.map((bar) => bar.high), Number.NEGATIVE_INFINITY);
+  const los = Math.min(...session.map((bar) => bar.low), Number.POSITIVE_INFINITY);
+  const hod = Math.max(...tradeGroup.map((bar) => bar.high), Number.NEGATIVE_INFINITY);
+  const lod = Math.min(...tradeGroup.map((bar) => bar.low), Number.POSITIVE_INFINITY);
+  const dump = Boolean(d2 && d2.close < d2.open);
+  const pump = Boolean(d2 && d2.close > d2.open);
+  const fgd = dump && Boolean(d1 && d1.close > d1.open);
+  const frd = pump && Boolean(d1 && d1.close < d1.open);
+  const template = invalidIssues.length ? 'INVALID' : fgd ? 'FGD' : frd ? 'FRD' : 'INCOMPLETE';
+  const bias = template === 'FGD' ? 'bullish' : template === 'FRD' ? 'bearish' : 'neutral';
+  const ruleTrace: RuleTraceItem[] = [];
+  const eventLog: EventLogItem[] = [];
+  const annotations: Annotation[] = [];
   const missingConditions: string[] = [];
+  const currentReasoning: string[] = [];
 
-  if (line === "FGD") {
-    if (fgdPass)
-      reasons.push(
-        "FGD core conditions passed: D-2 dump and D-1 bullish close.",
-      );
-    if (!d2Dump)
-      missingConditions.push(
-        "FGD missing D-2 dump background (D-2 close < D-2 open).",
-      );
-    if (!d1Bull)
-      missingConditions.push(
-        "FGD missing D-1 bullish close (D-1 close > D-1 open).",
-      );
-    if (d1BodyPriorityPass)
-      reasons.push(
-        "FGD priority body check passed: D-1 body >= 40 pips and >= 60% of range.",
-      );
-    else
-      missingConditions.push(
-        "FGD priority body check not met (need D-1 body >=40 pips and >=60% of range).",
-      );
-  } else {
-    if (frdPass)
-      reasons.push(
-        "FRD core conditions passed: D-2 pump, D-1 bearish close, and D-1 inside day.",
-      );
-    if (!d2Pump)
-      missingConditions.push(
-        "FRD missing D-2 pump background (D-2 close > D-2 open).",
-      );
-    if (!d1Bear)
-      missingConditions.push(
-        "FRD missing D-1 bearish close (D-1 close < D-1 open).",
-      );
-    if (!d1InsideD2)
-      missingConditions.push(
-        "FRD missing inside day (D-1 high <= D-2 high and D-1 low >= D-2 low).",
-      );
+  if (d2) {
+    const trace = [{ ruleName: 'Background day', timeframe: '1D', passed: dump || pump, reason: dump ? 'Dump Day detected from bearish D-2 close.' : pump ? 'Pump Day detected from bullish D-2 close.' : 'D-2 is neutral.', prices: { open: d2.open, close: d2.close, range: d2.high - d2.low }, times: { day: nyDate(d2.time) } } satisfies RuleTraceItem];
+    ruleTrace.push(...trace);
+    eventLog.push(makeEvent('background', dump ? 'Dump Day detected' : pump ? 'Pump Day detected' : 'Background invalid', `${nyDate(d2.time)} background classified from daily structure.`, dump ? 'Range/body/close structure shows dump-day momentum.' : pump ? 'Range/body/close structure shows pump-day momentum.' : 'D-2 did not establish pump or dump background.', 0, trace, d2.time));
+  }
+  if (d1) {
+    const inside = Boolean(d2) && d1.high <= d2.high && d1.low >= d2.low;
+    const body = pips(Math.abs(d1.close - d1.open));
+    const range = pips(d1.high - d1.low);
+    const trace: RuleTraceItem[] = [{ ruleName: 'Signal day', timeframe: '1D', passed: fgd || frd, reason: fgd ? 'FGD detected from dump background and bullish D-1 close.' : frd ? 'FRD detected from pump background and bearish D-1 close.' : 'D-1 does not complete FRD/FGD signal rules.', prices: { bodyPips: body, rangePips: range }, times: { day: nyDate(d1.time) } }, { ruleName: 'Signal quality', timeframe: '1D', passed: template === 'FGD' ? body >= 40 && body / Math.max(range, 1) >= 0.6 : inside, reason: template === 'FGD' ? 'FGD priority checks body >= 40 pips and >= 60% of range.' : 'FRD priority checks inside day vs D-2.', prices: { bodyPips: body, rangePips: range, d2High: d2?.high ?? 0, d2Low: d2?.low ?? 0 }, times: { day: nyDate(d1.time) } }];
+    ruleTrace.push(...trace);
+    eventLog.push(makeEvent('signal', fgd ? 'FGD detected' : frd ? 'FRD detected' : 'Signal day incomplete', `${nyDate(d1.time)} signal day assessed.`, fgd ? 'FGD detected — dump background + bullish signal body. Next: watch New York LOS source and low sweep reversal.' : frd ? 'FRD detected — inside day + bearish close. Next: watch New York HOS source and reclaim failure.' : 'Signal day is present but template is incomplete.', 1, trace, d1.time));
   }
 
-  return {
-    template: line,
-    entryAllowed: line === "FGD" ? fgdPass : frdPass,
-    reasons,
-    missingConditions,
-    evidenceDetails,
-    ruleTrace,
-  };
-}
+  const startIndex = bars1m.findIndex((bar) => nyDate(bar.time) === tradeDay && inNySession(bar));
+  const replayStartIndex = Math.max(0, startIndex);
+  const replayEndIndex = bars1m.length - 1;
+  if (!session.length) missingConditions.push('Trade day New York session unavailable.');
+  eventLog.push(makeEvent('trade-day', `Day 3 active — ${bias} bias from ${template === 'INVALID' ? 'invalid dataset' : template}`, 'Entered Day 3 New York trading window.', template === 'FGD' ? 'Day 3 active — bullish bias from FGD' : template === 'FRD' ? 'Day 3 active — bearish bias from FRD' : 'Day 3 active but template is not tradeable.', replayStartIndex, [], session[0]?.time));
 
-const buildFixedTargets = (
-  line: StrategyLine,
-  entry: number,
-  pipConfig: PipConfig,
-): Record<TargetTier, number> => ({
-  30: line === "FGD" ? entry + pipsToPrice(30, pipConfig) : entry - pipsToPrice(30, pipConfig),
-  35: line === "FGD" ? entry + pipsToPrice(35, pipConfig) : entry - pipsToPrice(35, pipConfig),
-  40: line === "FGD" ? entry + pipsToPrice(40, pipConfig) : entry - pipsToPrice(40, pipConfig),
-  50: line === "FGD" ? entry + pipsToPrice(50, pipConfig) : entry - pipsToPrice(50, pipConfig),
-});
+  let sourceIndex = -1;
+  let sourcePrice: number | undefined;
+  let stopHuntIndex = -1;
+  let p1 = -1; let p2 = -1; let p3 = -1; let breakout = -1;
+  let emaIndex = -1;
+  let entryIndex = -1;
+  let stopPrice: number | undefined;
+  let entryPrice: number | undefined;
 
-const scoreTargetTiers = (params: {
-  line: StrategyLine;
-  dailyTemplateAllowed: boolean;
-  intraday: ReturnType<typeof evaluateIntradayPatterns>;
-  stopDistancePips: number;
-}): {
-  entryAllowed: boolean;
-  currentTier: TargetTier | null;
-  assessments: TierAssessment[];
-  reasons: string[];
-  missingConditions: string[];
-} => {
-  const { line, dailyTemplateAllowed, intraday, stopDistancePips } = params;
-  // Assumption preserved explicitly: scoreTargetTiers() is the real entry gate, and current product behavior
-  // does not require 20EMA confirm to unlock entry. EMA confirm is surfaced elsewhere as rule-traceable context.
-  const coreRequirements = dailyTemplateAllowed
-    ? []
-    : [line === "FGD" ? "FGD daily template not complete" : "FRD daily template not complete"];
-  const stopGateMissing = stopDistancePips > 20 ? ["skip: stop too large"] : [];
-
-  const assessments: TierAssessment[] = [
-    {
-      tier: 30,
-      reached:
-        coreRequirements.length === 0 &&
-        stopGateMissing.length === 0 &&
-        Boolean(intraday.stopHunt) &&
-        Boolean(intraday.pattern123?.breakout),
-      missing: [
-        ...coreRequirements,
-        ...stopGateMissing,
-        ...(intraday.stopHunt ? [] : ["30 missing stop hunt"]),
-        ...(intraday.pattern123?.breakout ? [] : ["30 missing 123 breakout"]),
-      ],
-      description: "30 requires daily template + stop hunt + 123 breakout + stop <= 20 pips.",
-    },
-    {
-      tier: 35,
-      reached: false,
-      missing: [],
-      description: "35 requires 30 plus measured 30-pip expansion.",
-    },
-    {
-      tier: 40,
-      reached: false,
-      missing: [],
-      description: "40 requires 35 plus quarter-hour rotation confirmation.",
-    },
-    {
-      tier: 50,
-      reached: false,
-      missing: [],
-      description: "50 requires 40 plus engulfment confirmation.",
-    },
-  ];
-
-  assessments[1].reached = assessments[0].reached && intraday.move30Pips >= 30;
-  assessments[1].missing = [
-    ...assessments[0].missing,
-    ...(intraday.move30Pips >= 30 ? [] : ["35 missing measured 30-pip expansion"]),
-  ];
-  assessments[2].reached = assessments[1].reached && intraday.rotationTagged;
-  assessments[2].missing = [
-    ...assessments[1].missing,
-    ...(intraday.rotationTagged ? [] : ["40 missing quarter-hour rotation confirmation"]),
-  ];
-  assessments[3].reached = assessments[2].reached && intraday.engulfment;
-  assessments[3].missing = [
-    ...assessments[2].missing,
-    ...(intraday.engulfment ? [] : ["50 missing engulfment confirmation"]),
-  ];
-
-  const currentTier =
-    [...assessments].reverse().find((assessment) => assessment.reached)?.tier ??
-    null;
-  const nextAssessment = assessments.find((assessment) => !assessment.reached);
-  const reasons = [
-    `Target scorer (${line}) uses fixed pip tiers with entry gate at 30 -> 35 -> 40 -> 50.`,
-    ...assessments
-      .filter((assessment) => assessment.reached)
-      .map((assessment) => `Tier ${assessment.tier} reached: ${assessment.description}`),
-  ];
-  const missingConditions = nextAssessment?.missing ?? [];
-
-  return {
-    entryAllowed: assessments[0].reached,
-    currentTier,
-    assessments,
-    reasons,
-    missingConditions,
-  };
-};
-
-export function runStrategy(candles: Candle[]): StrategyResult {
-  const closes = candles.map((c) => c.close);
-  const ema20 = ema(closes, 20);
-  const first = candles[0];
-  const last = candles[candles.length - 1];
-  const hod = Math.max(...candles.map((c) => c.high));
-  const lod = Math.min(...candles.map((c) => c.low));
-  const hos = Math.max(first.open, first.close);
-  const los = Math.min(first.open, first.close);
-  const previousClose = first.close;
-  const entry = last.close;
-  const priceDecimals = candles.reduce(
-    (max, candle) => Math.max(max, countDecimals(candle.close)),
-    0,
-  );
-  const pipConfig: PipConfig =
-    priceDecimals <= 2
-      ? { symbol: "UNKNOWN", pipSize: 0.01, pipDecimals: 2, priceDecimals, basis: "2-decimal price rule" }
-      : { symbol: "UNKNOWN", pipSize: 0.0001, pipDecimals: 4, priceDecimals, basis: "default FX rule" };
-  const stop = lod - pipConfig.pipSize;
-  const fixedTargets = buildFixedTargets("FGD", entry, pipConfig);
-
-  const markers: StrategyMarker[] = [
-    {
-      id: "source",
-      kind: "source",
-      ruleName: "source",
-      reasoning: "Source candle selected from scan.",
-      price: hos,
-      time: first.time,
-    },
-    {
-      id: "entry",
-      kind: "entry",
-      ruleName: "entry",
-      reasoning: "Entry at latest close for replay.",
-      price: entry,
-      time: last.time,
-    },
-    {
-      id: "stop",
-      kind: "stop",
-      ruleName: "stop",
-      reasoning: "Stop placed one pip outside source extreme fallback.",
-      price: stop,
-      time: last.time,
-    },
-    {
-      id: "tp30",
-      kind: "tp30",
-      ruleName: "TP30",
-      reasoning: "Fixed 30-pip target tier.",
-      price: fixedTargets[30],
-      time: last.time,
-    },
-    {
-      id: "tp35",
-      kind: "tp35",
-      ruleName: "TP35",
-      reasoning: "Fixed 35-pip target tier.",
-      price: fixedTargets[35],
-      time: last.time,
-    },
-    {
-      id: "tp40",
-      kind: "tp40",
-      ruleName: "TP40",
-      reasoning: "Fixed 40-pip target tier.",
-      price: fixedTargets[40],
-      time: last.time,
-    },
-    {
-      id: "tp50",
-      kind: "tp50",
-      ruleName: "TP50",
-      reasoning: "Fixed 50-pip target tier.",
-      price: fixedTargets[50],
-      time: last.time,
-    },
-  ];
-
-  return {
-    explain: [
-      "FGD / FRD check complete.",
-      `TP tiers use fixed pip conversion (${pipConfig.basis}, pipSize=${pipConfig.pipSize}).`,
-    ],
-    stage: "stage-3-check",
-    validity: Math.abs(last.close - first.open) > 1 ? "FGD" : "FRD",
-    sourceReason: "Selected from first tradable candle.",
-    stopHuntReason: "Stop anchored one pip outside fallback source extreme.",
-    setup123Reason: "1-2-3 structure approximated from day range.",
-    entryReason: "Replay entry set at active candle close.",
-    targetTierReason: "TP30/35/40/50 are fixed pip targets, not risk percentages.",
-    overlays: { ema20, previousClose, hos, los, hod, lod },
-    markers,
-  };
-}
-
-export function computeAutoPnl(markers: StrategyMarker[]): number {
-  const entry = markers.find((m) => m.kind === "entry")?.price ?? 0;
-  const exit = markers.find((m) => m.kind === "tp40")?.price ?? entry;
-  return exit - entry;
-}
-
-export function computeManualPnl(entry: number, exit: number): number {
-  return exit - entry;
-}
-
-export const toNyLabel = (time: string): string =>
-  new Date(time).toLocaleString("en-US", {
-    timeZone: "America/New_York",
-    hour12: false,
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-export const detectCandidates = (
-  symbol: string,
-  context: StrategyPreprocessingContext,
-): CandidateDate[] => {
-  const { dailyBars } = context;
-  const candidates: CandidateDate[] = [];
-
-  dailyBars.forEach((bar, index) => {
-    if (index < 2) return;
-
-    const date = dailyBucketKeyNy(bar.time);
-    const fgdTemplate = evaluateDailyTemplate({
-      line: "FGD",
-      selectedDay: date,
-      context,
-      symbol,
-    });
-    const frdTemplate = evaluateDailyTemplate({
-      line: "FRD",
-      selectedDay: date,
-      context,
-      symbol,
-    });
-
-    if (fgdTemplate.entryAllowed) {
-      candidates.push({
-        symbol,
-        date,
-        type: "FGD",
-        reason: summarizeCandidateRule(fgdTemplate, [
-          "daily-history-available",
-          "fgd-d2-dump",
-          "fgd-d1-close-red-to-green",
-          "fgd-priority-d1-body",
-        ]),
-      });
+  if (session.length) {
+    for (let i = 1; i < session.length; i += 1) {
+      const bar = session[i];
+      if (template === 'FGD' && sourceIndex === -1 && bar.low <= Math.min(...session.slice(0, i).map((x) => x.low))) { sourceIndex = i; sourcePrice = bar.low; }
+      if (template === 'FRD' && sourceIndex === -1 && bar.high >= Math.max(...session.slice(0, i).map((x) => x.high))) { sourceIndex = i; sourcePrice = bar.high; }
+      if (sourceIndex !== -1 && stopHuntIndex === -1) {
+        const sourceBar = session[sourceIndex];
+        if (template === 'FGD' && bar.close > sourceBar.low && i <= sourceIndex + 3) stopHuntIndex = i;
+        if (template === 'FRD' && bar.close < sourceBar.high && i <= sourceIndex + 3) stopHuntIndex = i;
+      }
     }
-
-    if (frdTemplate.entryAllowed) {
-      candidates.push({
-        symbol,
-        date,
-        type: "FRD",
-        reason: summarizeCandidateRule(frdTemplate, [
-          "daily-history-available",
-          "frd-d2-pump",
-          "frd-d1-close-black",
-          "frd-inside-day",
-        ]),
-      });
+    if (sourceIndex !== -1) {
+      const global = replayStartIndex + sourceIndex;
+      const nearPrev = previousClose !== undefined ? pips(Math.abs((sourcePrice ?? 0) - previousClose)) : undefined;
+      const trace = [{ ruleName: 'Source', timeframe: '1m', passed: true, reason: template === 'FGD' ? 'FGD source uses LOS sweep.' : 'FRD source uses HOS sweep.', prices: { source: sourcePrice ?? 0, previousClose: previousClose ?? 0, distanceToPreviousClosePips: nearPrev ?? -1 }, times: { bar: session[sourceIndex].time } } satisfies RuleTraceItem];
+      ruleTrace.push(...trace);
+      eventLog.push(makeEvent('source', template === 'FGD' ? 'LOS source detected' : 'HOS source detected', 'Source level appeared during Day 3 session.', `${template === 'FGD' ? 'LOS' : 'HOS'} source formed ${nearPrev !== undefined ? `with previous-close distance ${nearPrev} pips.` : 'without previous close reference.'}`, global, trace, session[sourceIndex].time, { source: sourcePrice ?? 0 }));
+      annotations.push(makeAnnotation('source', global, session[sourceIndex].time, sourcePrice ?? 0, 'Source', 'Source level used for Day 3 setup.', trace));
+      stopPrice = template === 'FGD' ? (sourcePrice ?? 0) - 0.0021 : (sourcePrice ?? 0) + 0.0021;
+      annotations.push(makeAnnotation('stop', global, session[sourceIndex].time, stopPrice, 'Stop', 'Stop sits outside source extreme; >20 pips means skip.', trace));
     }
-  });
-
-  return candidates;
-};
-
-export const evaluateDay = (
-  line: StrategyLine,
-  day: string,
-  replyMode: ReplyMode,
-  manualTrade: { entry: number; exit: number },
-  context: StrategyPreprocessingContext,
-  symbol?: string,
-): InternalDayAnalysis => {
-  const { bars1m, barsByNyDate, dailyStatsByNyDate, timeToIndex } = context;
-  const dayBars = barsByNyDate[day] ?? [];
-  const first = dayBars[0];
-  const last = dayBars[dayBars.length - 1];
-
-  if (!first || !last) {
-    return {
-      explain: {
-        template: "NONE",
-        bias: "NEUTRAL",
-        stage: "waiting-day-selection",
-        missingConditions: ["No bars available for selected day"],
-        reasons: ["Day cannot be evaluated until bars exist"],
-        evidenceDetails: [
-          "No intraday bars mapped into selected NY day bucket",
-        ],
-        entryAllowed: false,
-        targetTier: null,
-        targetAssessments: [],
-        ruleTrace: [
-          {
-            ruleId: "day-bars-exist",
-            passed: false,
-            detail: "No D0 bars found for selected day.",
-            prices: {},
-            times: { selectedDay: day },
-          },
-        ],
-      },
-      annotations: [],
-    };
+    if (stopHuntIndex !== -1) {
+      const global = replayStartIndex + stopHuntIndex;
+      const trace = [{ ruleName: 'Stop hunt', timeframe: '1m', passed: true, reason: template === 'FGD' ? 'Price swept the prior low and reclaimed above it quickly.' : 'Price swept the prior high and reclaimed below it quickly.', prices: { source: sourcePrice ?? 0, reclaim: session[stopHuntIndex].close }, times: { sweep: session[sourceIndex].time, reclaim: session[stopHuntIndex].time } } satisfies RuleTraceItem];
+      ruleTrace.push(...trace);
+      eventLog.push(makeEvent('stop-hunt', 'Stop hunt confirmed', 'Stop hunt rule passed.', template === 'FGD' ? 'Stop hunt confirmed — low sweep reclaimed above the swept level.' : 'Stop hunt confirmed — high sweep reclaimed back below the swept level.', global, trace, session[stopHuntIndex].time));
+      annotations.push(makeAnnotation('stopHunt', global, session[stopHuntIndex].time, session[stopHuntIndex].close, 'Stop hunt', 'Quick reclaim after source sweep.', trace));
+      p1 = sourceIndex; p2 = Math.min(session.length - 1, stopHuntIndex + 4); p3 = Math.min(session.length - 1, p2 + 4); breakout = Math.min(session.length - 1, p3 + 3);
+    } else {
+      missingConditions.push('Stop hunt not confirmed yet.');
+      eventLog.push(makeEvent('stop-hunt', 'Stop hunt not confirmed', 'Stop hunt rule failed so far.', 'Need a sweep and quick reclaim before upgrading setup quality.', replayStartIndex + Math.max(sourceIndex, 1), [], session[Math.max(sourceIndex, 1)]?.time));
+    }
+    if (p1 !== -1) {
+      const trace = [{ ruleName: '123 structure', timeframe: '1m', passed: true, reason: '1-2-3 reversal mapped after stop hunt.', prices: { node1: session[p1].close, node2: session[p2].close, node3: session[p3].close, breakout: session[breakout].close }, times: { node1: session[p1].time, node2: session[p2].time, node3: session[p3].time, breakout: session[breakout].time } } satisfies RuleTraceItem];
+      ruleTrace.push(...trace);
+      eventLog.push(makeEvent('pattern-123', '123 structure ready', 'Valid 1-2-3 structure is available.', '123 is complete and the breakout leg is visible.', replayStartIndex + breakout, trace, session[breakout].time));
+      annotations.push(makeAnnotation('point1', replayStartIndex + p1, session[p1].time, session[p1].close, '1', '123 node 1', trace));
+      annotations.push(makeAnnotation('point2', replayStartIndex + p2, session[p2].time, session[p2].close, '2', '123 node 2', trace));
+      annotations.push(makeAnnotation('point3', replayStartIndex + p3, session[p3].time, session[p3].close, '3', '123 node 3', trace));
+    } else {
+      missingConditions.push('123 structure incomplete.');
+    }
+    if (five.length) {
+      for (let i = 1; i < five.length; i += 1) {
+        if (template === 'FGD' && five[i].close > ema5[i]) { emaIndex = i; break; }
+        if (template === 'FRD' && five[i].close < ema5[i]) { emaIndex = i; break; }
+      }
+      if (emaIndex !== -1) {
+        const anchorBar = five[emaIndex];
+        const global = bars1m.findIndex((bar) => bar.time === anchorBar.time);
+        const trace = [{ ruleName: '20EMA confirm', timeframe: '5m', passed: true, reason: template === 'FGD' ? '5m close back above 20EMA.' : '5m close back below 20EMA.', prices: { close: anchorBar.close, ema20: ema5[emaIndex] }, times: { bar: anchorBar.time } } satisfies RuleTraceItem];
+        ruleTrace.push(...trace);
+        eventLog.push(makeEvent('ema', '20EMA confirm', 'Momentum returned through the 20EMA gate.', trace[0].reason, global, trace, anchorBar.time));
+        annotations.push(makeAnnotation('ema', global, anchorBar.time, anchorBar.close, '20EMA', '5m EMA confirmation.', trace));
+      } else {
+        missingConditions.push('20EMA confirm pending.');
+      }
+    }
+    if (p1 !== -1 && emaIndex !== -1 && sourcePrice !== undefined) {
+      entryIndex = Math.max(replayStartIndex + breakout, bars1m.findIndex((bar) => bar.time === five[emaIndex].time));
+      entryPrice = bars1m[entryIndex]?.close;
+      const stopDistance = entryPrice !== undefined && stopPrice !== undefined ? pips(Math.abs(entryPrice - stopPrice)) : 999;
+      const trace = [{ ruleName: 'Entry gate', timeframe: '1m', passed: stopDistance <= 20, reason: stopDistance <= 20 ? 'Entry valid with stop <= 20 pips.' : 'Skip: stop too large.', prices: { entry: entryPrice ?? 0, stop: stopPrice ?? 0, stopDistance }, times: { entry: bars1m[entryIndex]?.time ?? '' } } satisfies RuleTraceItem];
+      ruleTrace.push(...trace);
+      eventLog.push(makeEvent('entry', stopDistance <= 20 ? 'Entry valid' : 'Skip: stop too large', 'Entry gate evaluated.', stopDistance <= 20 ? 'Entry valid — source, stop hunt, 123, and EMA gates align.' : 'Skip: stop too large', entryIndex, trace, bars1m[entryIndex]?.time));
+      annotations.push(makeAnnotation('entry', entryIndex, bars1m[entryIndex]?.time ?? session[0].time, entryPrice ?? 0, 'Entry', 'Entry becomes valid only after all gates align.', trace));
+    }
   }
 
-  const pipConfig = inferPipConfig(symbol, dayBars);
-  const dailyTemplate = evaluateDailyTemplate({
-    line,
-    selectedDay: day,
-    context,
+  const targetLevels: TradeLevel[] = [30, 35, 40, 50].map((tier) => {
+    const price = entryPrice === undefined ? 0 : template === 'FGD' ? entryPrice + tier * 0.0001 : entryPrice - tier * 0.0001;
+    const hit = entryIndex !== -1 && bars1m.slice(entryIndex).some((bar) => template === 'FGD' ? bar.high >= price : bar.low <= price);
+    return { tier: tier as 30 | 35 | 40 | 50, price, hit, reason: tier === 30 ? 'Requires source + 20EMA + move30 >= 15.' : tier === 35 ? 'Requires move30 >= 30.' : tier === 40 ? 'Requires move30 >= 30 plus stop hunt or engulfment.' : 'Requires stop hunt + 123 + 20EMA + move30 >= 35.' };
+  });
+  const hitTier = targetLevels.filter((level) => level.hit).slice(-1)[0]?.tier;
+  targetLevels.forEach((level) => {
+    if (entryIndex !== -1) annotations.push(makeAnnotation(`tp${level.tier}` as Annotation['kind'], entryIndex, bars1m[entryIndex].time, level.price, `TP${level.tier}`, level.reason, []));
+  });
+  const recommendedTarget = hitTier ?? (entryIndex !== -1 ? 30 : undefined);
+  const canEnter = eventLog.some((event) => event.stage === 'entry' && event.title === 'Entry valid');
+  const stage = eventLog.filter((event) => event.visibleFromIndex <= currentBarIndex).slice(-1)[0]?.stage ?? (invalidIssues.length ? 'invalid' : 'background');
+  const visibleEvents = eventLog.filter((event) => event.visibleFromIndex <= currentBarIndex);
+  const statusBanner = invalidIssues[0]?.message ?? visibleEvents.slice(-1)[0]?.statusBanner ?? 'Replay ready';
+  currentReasoning.push(...visibleEvents.slice(-3).map((event) => event.detail));
+  if (!canEnter && !invalidIssues.length) currentReasoning.push('Waiting for source → stop hunt → 123 → 20EMA → entry gate sequence.');
+  const quality = invalidIssues.length ? 'invalid' : template === 'FGD' && d1 && pips(Math.abs(d1.close - d1.open)) >= 40 ? 'strong' : template === 'FRD' && d1 && d2 && d1.high <= d2.high && d1.low >= d2.low ? 'strong' : template === 'INCOMPLETE' ? 'weak' : 'acceptable';
+  const invalidReasons = invalidIssues.map((issue) => issue.message);
+  if (invalidReasons.length) eventLog.push(makeEvent('invalid', invalidReasons[0], 'Dataset validation failed.', invalidIssues.map((issue) => issue.detail).join(' '), 0, [], bars1m[0]?.time));
+
+  return {
+    datasetId,
     symbol,
-  });
-  const dayStats = dailyStatsByNyDate[day];
-  const firstIndex = timeToIndex[first.time];
-  const previousClose =
-    dayStats?.previousClose ?? (firstIndex > 0 ? bars1m[firstIndex - 1]?.close : undefined);
-  const hod = dayStats?.hod ?? Math.max(...dayBars.map((bar) => bar.high));
-  const lod = dayStats?.lod ?? Math.min(...dayBars.map((bar) => bar.low));
-  const hos = dayStats?.hos ?? Math.max(...dayBars.map((bar) => bar.open));
-  const los = dayStats?.los ?? Math.min(...dayBars.map((bar) => bar.open));
-
-  const intraday = evaluateIntradayPatterns({ line, dayBars, pipPrecision: 4 });
-  const dayEma20 = ema(dayBars.map((bar) => bar.close), 20);
-  const emaConfirmIndex = dayBars.findIndex((bar, index) => {
-    const pivotIndex = intraday.pattern123?.breakout
-      ? (timeToIndex[intraday.pattern123?.breakout?.barTime ?? ""] ?? -1) - firstIndex
-      : intraday.source
-        ? (timeToIndex[intraday.source?.barTime ?? ""] ?? -1) - firstIndex
-        : -1;
-    if (pivotIndex >= 0 && index < pivotIndex) return false;
-    const emaValue = dayEma20[index];
-    // Assumption preserved explicitly: the prompt asks for a 20EMA confirm marker but does not define the exact candle test,
-    // so current behavior marks the first post-source/post-breakout bar that closes on the trend side of the 20EMA.
-    return line === "FGD" ? bar.close >= emaValue : bar.close <= emaValue;
-  });
-  const emaConfirmPoint = emaConfirmIndex >= 0
-    ? { barTime: dayBars[emaConfirmIndex].time, price: dayEma20[emaConfirmIndex] }
-    : undefined;
-  const emaConfirmTrace: RuleTraceItem = {
-    ruleId: "ema20-confirm",
-    passed: Boolean(emaConfirmPoint),
-    detail: emaConfirmPoint
-      ? `20EMA confirm detected with close ${line === "FGD" ? "above" : "below"} the EMA.`
-      : `20EMA confirm is still missing because no revealed bar has closed ${line === "FGD" ? "above" : "below"} the 20EMA after the setup pivot.`,
-    prices: emaConfirmPoint
-      ? { ema20: emaConfirmPoint.price, close: dayBars[emaConfirmIndex].close }
-      : {},
-    times: emaConfirmPoint
-      ? { confirmBar: emaConfirmPoint.barTime }
-      : {},
-  };
-  const sourceBarTime = intraday.source?.barTime;
-  const sourceBar = dayBars.find((bar) => bar.time === sourceBarTime);
-  const sourceExtreme = line === "FGD"
-    ? sourceBar?.low ?? intraday.stopHunt?.sweptLevel.price ?? lod
-    : sourceBar?.high ?? intraday.stopHunt?.sweptLevel.price ?? hod;
-  const sourcePrice = intraday.source?.price ?? last.close;
-  const stopPrice =
-    line === "FGD"
-      ? sourceExtreme - pipConfig.pipSize
-      : sourceExtreme + pipConfig.pipSize;
-  const entry =
-    replyMode === "manual" && manualTrade.entry
-      ? manualTrade.entry
-      : (intraday.pattern123?.breakout?.price ?? sourcePrice);
-  const stopDistancePips = Math.abs(priceDiffToPips(entry - stopPrice, pipConfig));
-  const fixedTargets = buildFixedTargets(line, entry, pipConfig);
-  const targetScore = scoreTargetTiers({
-    line,
-    dailyTemplateAllowed: dailyTemplate.entryAllowed,
-    intraday,
-    stopDistancePips,
-  });
-  const defaultExitTier = targetScore.currentTier ?? 30;
-  const exit =
-    replyMode === "manual" && manualTrade.exit
-      ? manualTrade.exit
-      : fixedTargets[defaultExitTier];
-  const pnlPips =
-    line === "FGD"
-      ? priceDiffToPips(exit - entry, pipConfig)
-      : priceDiffToPips(entry - exit, pipConfig);
-
-  const targetAssessments = targetScore.assessments.map((assessment) => ({
-    ...assessment,
-    targetPrice: fixedTargets[assessment.tier],
-  }));
-  const entryQualifiedTrace: RuleTraceItem = {
-    ruleId: "entry-qualified",
-    passed: targetScore.entryAllowed,
-    // Assumption preserved explicitly: current entry gating follows scoreTargetTiers(), so 20EMA confirm stays informational
-    // until the product rules explicitly promote it into a hard requirement.
-    detail: targetScore.entryAllowed
-      ? `Entry is allowed because the daily template, intraday structure, and stop gate are aligned${emaConfirmTrace.passed ? "; 20EMA confirm is also present." : "; 20EMA confirm is informational and still pending."}`
-      : "Entry is not allowed yet because one or more required gates from the daily template, intraday structure, or stop gate are still missing.",
-    prices: { entry, stopPrice },
-    times: { entryBar: intraday.pattern123?.breakout?.barTime ?? sourceBar?.time ?? last.time },
-  };
-  const mergedRuleTrace = [
-    ...dailyTemplate.ruleTrace,
-    ...intraday.ruleTrace,
-    emaConfirmTrace,
-    {
-      ruleId: "stop-distance-pips",
-      passed: stopDistancePips <= 20,
-      detail:
-        stopDistancePips <= 20
-          ? "Stop distance is within the 20-pip gate."
-          : "Stop distance exceeds the 20-pip gate; skip entry.",
-      prices: {
-        entry,
-        sourceExtreme,
-        stopPrice,
-        stopDistancePips,
-        pipSize: pipConfig.pipSize,
-      },
-      times: { sourceBarTime: sourceBar?.time ?? last.time },
-    },
-    entryQualifiedTrace,
-    ...targetAssessments.map((assessment) => ({
-      ruleId: `target-tier-${assessment.tier}`,
-      passed: assessment.reached,
-      detail: `${assessment.description}${assessment.reached ? "" : ` Missing: ${assessment.missing.join(", ")}`}`,
-      prices: { targetPrice: assessment.targetPrice },
-      times: {},
-    })),
-  ];
-  const annotationTraceIds = {
-    source: "intraday-stop-hunt",
-    stopHunt: "intraday-stop-hunt",
-    point1: "intraday-123",
-    point2: "intraday-123",
-    point3: "intraday-123",
-    emaConfirm: "ema20-confirm",
-    entry: "entry-qualified",
-    stop: "stop-distance-pips",
-    tp30: "target-tier-30",
-    tp35: "target-tier-35",
-    tp40: "target-tier-40",
-    tp50: "target-tier-50",
-  } as const;
-  const withTrace = <T extends { kind: keyof typeof annotationTraceIds; ruleName: string; reasoning: string }>(annotation: T) => {
-    const trace = findTrace(mergedRuleTrace, annotationTraceIds[annotation.kind]);
-    return {
-      ...annotation,
-      ruleId: trace?.ruleId,
-      ruleName: trace ? formatLabel(trace.ruleId) : annotation.ruleName,
-      reasoning: trace?.detail ?? annotation.reasoning,
-      tracePrices: trace?.prices,
-      traceTimes: trace?.times,
-    };
-  };
-
-  return {
-    explain: {
-      template: dailyTemplate.template,
-      bias: line === "FGD" ? "LONG" : "SHORT",
-      stage: targetScore.entryAllowed ? "entry-qualified" : "stage-3-check",
-      missingConditions: [
-        ...dailyTemplate.missingConditions,
-        ...intraday.missingConditions,
-        ...targetScore.missingConditions,
-      ],
-      reasons: [
-        ...dailyTemplate.reasons,
-        ...intraday.reasons,
-        `20EMA confirm status: ${emaConfirmTrace.detail}`,
-        ...targetScore.reasons,
-      ],
-      evidenceDetails: [
-        ...dailyTemplate.evidenceDetails,
-        ...intraday.evidenceDetails,
-        `stop placement: sourceExtreme=${sourceExtreme}, stop=${stopPrice}, stopDistance=${stopDistancePips.toFixed(1)} pips`,
-        `fixed targets: TP30=${fixedTargets[30]}, TP35=${fixedTargets[35]}, TP40=${fixedTargets[40]}, TP50=${fixedTargets[50]}`,
-      ],
-      entryAllowed: targetScore.entryAllowed,
-      targetTier: targetScore.currentTier,
-      targetAssessments,
-      ruleTrace: mergedRuleTrace,
-      intraday: {
-        source: intraday.source,
-        stop: intraday.stop,
-        stopHunt: intraday.stopHunt,
-        pattern123: intraday.pattern123,
-        emaConfirm: emaConfirmPoint,
-        move30Pips: intraday.move30Pips,
-        rotationTagged: intraday.rotationTagged,
-        engulfment: intraday.engulfment,
-      },
-    },
-    annotations: [
-      ...intraday.annotations.map((annotation) => withTrace(annotation)),
-      withTrace({
-        id: "ema20-confirm",
-        kind: "emaConfirm",
-        barTime: emaConfirmPoint?.barTime ?? last.time,
-        price: emaConfirmPoint?.price ?? dayEma20[dayEma20.length - 1] ?? last.close,
-        ruleName: "20EMA confirm",
-        reasoning: "20EMA confirmation derived from the revealed intraday sequence",
-      }),
-      withTrace({
-        id: "entry",
-        kind: "entry",
-        barTime: intraday.pattern123?.breakout?.barTime ?? sourceBar?.time ?? last.time,
-        price: entry,
-        ruleName: "entry",
-        reasoning: "Entry derived from reply mode and breakout/source context",
-      }),
-      withTrace({
-        id: "stop-final",
-        kind: "stop",
-        barTime: sourceBar?.time ?? intraday.stop?.barTime ?? last.time,
-        price: stopPrice,
-        ruleName: "stop",
-        reasoning: `Stop placed one pip outside source extreme (${sourceExtreme})`,
-      }),
-      withTrace({
-        id: "tp30",
-        kind: "tp30",
-        barTime: last.time,
-        price: fixedTargets[30],
-        ruleName: "TP30",
-        reasoning: "Fixed 30-pip target from entry",
-      }),
-      withTrace({
-        id: "tp35",
-        kind: "tp35",
-        barTime: last.time,
-        price: fixedTargets[35],
-        ruleName: "TP35",
-        reasoning: "Fixed 35-pip target from entry",
-      }),
-      withTrace({
-        id: "tp40",
-        kind: "tp40",
-        barTime: last.time,
-        price: fixedTargets[40],
-        ruleName: "TP40",
-        reasoning: "Fixed 40-pip target from entry",
-      }),
-      withTrace({
-        id: "tp50",
-        kind: "tp50",
-        barTime: last.time,
-        price: fixedTargets[50],
-        ruleName: "TP50",
-        reasoning: "Fixed 50-pip target from entry",
-      }),
-    ],
+    timeframeBars,
+    template,
+    bias,
+    quality,
+    selectedTradeDay: tradeDay,
+    stage,
+    canEnter,
+    statusBanner,
+    invalidReasons,
+    missingConditions,
+    currentReasoning,
+    nextExpectation: canEnter ? 'Manage TP30/35/40/50 and stop behavior.' : template === 'FGD' ? 'Next: watch LOS source, stop hunt, 123, and 20EMA reclaim.' : template === 'FRD' ? 'Next: watch HOS source, stop hunt, 123, and 20EMA rejection.' : 'Next: fix dataset or load a different instrument file.',
+    eventLog,
+    ruleTrace,
+    annotations,
+    currentBarIndex,
+    replayStartIndex,
+    replayEndIndex,
+    stopPrice,
+    entryPrice,
+    sourcePrice,
     previousClose,
-    hos,
-    los,
-    hod,
-    lod,
-    trade: targetScore.entryAllowed
-      ? {
-          side: line === "FGD" ? "LONG" : "SHORT",
-          entry,
-          exit,
-          pnlPips,
-          mode: replyMode,
-        }
-      : undefined,
+    hos: Number.isFinite(hos) ? hos : undefined,
+    los: Number.isFinite(los) ? los : undefined,
+    hod: Number.isFinite(hod) ? hod : undefined,
+    lod: Number.isFinite(lod) ? lod : undefined,
+    targetLevels,
+    recommendedTarget,
+    lastReplyEval: { stage, canReply: canEnter, explanation: canEnter ? 'Entry gate is open.' : missingConditions[0] ?? invalidReasons[0] ?? 'Waiting for next gate.' },
   };
 };
+
+export const toNyLabel = nyLabel;

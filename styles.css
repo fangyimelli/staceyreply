@@ -1,10 +1,18 @@
-body { font-family: Arial, sans-serif; margin: 12px; background: #111827; color: #e5e7eb; }
-.controls { display:flex; gap:8px; flex-wrap: wrap; margin-bottom: 10px; }
-.replay-controls { align-items: center; border: 1px solid #334155; padding: 8px; background: #0f172a; }
-.layout { display:grid; grid-template-columns: 1fr 320px; gap:12px; }
-#chart { border:1px solid #334155; background:#0b1220; }
-#explain { border:1px solid #334155; padding:10px; background:#0f172a; }
-.dates { margin: 8px 0; color: #93c5fd; max-height: 120px; overflow: auto; }
-.progress { margin: 6px 0 10px; color: #fde68a; }
-.tooltip { position:absolute; display:none; background:#1f2937; border:1px solid #6b7280; color:#f9fafb; padding:6px; font-size:12px; pointer-events:none; z-index:99; }
-button, select, input { background: #1f2937; color: #f9fafb; border: 1px solid #475569; padding: 6px; }
+:root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+body { margin: 0; background: #020617; color: #e2e8f0; }
+* { box-sizing: border-box; }
+.app-shell { padding: 16px; display: grid; gap: 16px; }
+header h1 { margin: 0 0 8px; }
+.control-grid, .info-strip, .footer-grid { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.control-grid label { display: grid; gap: 4px; min-width: 160px; }
+button, select { background: #111827; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; }
+.main-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(360px, 1fr); gap: 16px; }
+.chart-shell, .explain-shell, .footer-grid > div, .info-strip > div { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; }
+.status-banner { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+.chart-stage-note { color: #93c5fd; margin-bottom: 8px; }
+.explain-shell { max-height: 760px; overflow: auto; display: grid; gap: 12px; }
+.trace-list { display: grid; gap: 8px; }
+.trace-card { padding: 8px; border-radius: 8px; background: #111827; border: 1px solid #334155; }
+.tooltip-card { background: #0f172a; border: 1px solid #334155; padding: 10px; max-width: 320px; }
+code { color: #fde68a; }
+@media (max-width: 1200px) { .main-grid { grid-template-columns: 1fr; } }
