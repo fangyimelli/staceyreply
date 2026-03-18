@@ -96,6 +96,17 @@ export function ExplainPanel({
           {explain.intraday?.engulfment ? "yes" : "no"}
         </li>
       </ul>
+      <h4>Target tiers</h4>
+      <ul>
+        {explain.targetAssessments.map((assessment) => (
+          <li key={assessment.tier}>
+            <strong>TP{assessment.tier}:</strong> {assessment.reached ? "reached" : "not yet"} — target={assessment.targetPrice.toFixed(5)} — {assessment.description}
+            {!assessment.reached && assessment.missing.length ? (
+              <div style={{ color: "#475569" }}>Missing: {assessment.missing.join(", ")}</div>
+            ) : null}
+          </li>
+        ))}
+      </ul>
       <h4>Missing conditions</h4>
       <ul>
         {explain.missingConditions.map((m) => (

@@ -31,6 +31,7 @@ Local single-page app for Day 3 practice/reply workflow. It loads local OHLCV CS
 - Daily template evaluation for FGD / FRD with rule-traceable pass/fail output.
 - Intraday evaluation now exposes: stop hunt, 123 node 1/2/3 + breakout, move30, quarter-hour rotation tag, and engulfment state.
 - Explain panel shows per-rule pass/fail reasons plus price/time evidence for annotations and review.
+- Pip-aware scoring now converts prices by symbol/decimals, blocks entries when stop distance exceeds 20 pips, and grades fixed TP30/35/40/50 targets with missing-condition feedback.
 - Local sample mode, local CSV/JSON upload, and acceptance-checklist-oriented workflow remain supported.
 
 ---

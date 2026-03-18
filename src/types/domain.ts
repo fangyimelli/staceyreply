@@ -21,6 +21,14 @@ export interface SymbolDataset {
 }
 
 // Internal analysis structures (strategy / replay pipeline).
+export interface TargetAssessment {
+  tier: 30 | 35 | 40 | 50;
+  reached: boolean;
+  missing: string[];
+  description: string;
+  targetPrice: number;
+}
+
 export interface InternalExplainState {
   template: "FGD" | "FRD" | "NONE";
   bias: "LONG" | "SHORT" | "NEUTRAL";
@@ -30,6 +38,7 @@ export interface InternalExplainState {
   evidenceDetails: string[];
   entryAllowed: boolean;
   targetTier: 30 | 35 | 40 | 50 | null;
+  targetAssessments: TargetAssessment[];
   ruleTrace: RuleTraceItem[];
   intraday?: IntradayRuleSummary;
 }
