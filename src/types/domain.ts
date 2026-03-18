@@ -29,6 +29,14 @@ export interface CandidateDate {
   type: StrategyLine;
   reason: string;
 }
+
+export interface ImportedSignalRow {
+  pair: string;
+  date: string;
+  signal: StrategyLine;
+  status?: "pass" | "fail" | "backend" | "candidate";
+}
+
 export interface SymbolDataset {
   symbol: string;
   bars1m: OhlcvBar[];
@@ -176,6 +184,7 @@ export interface ReplayState {
 }
 
 export interface FrontendScreenedPayload {
+  importedSignalRows: ImportedSignalRow[];
   screenedResults: ScreenedResultRow[];
   activeSymbol: string;
   bars: OhlcvBar[];
