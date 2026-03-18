@@ -120,7 +120,22 @@ export interface TradeLevel {
   reason: string;
 }
 
-export interface ReplayAnalysis {
+export interface ReplayVisibility {
+  stage: ReplayStageId;
+  canEnter: boolean;
+  statusBanner: string;
+  currentReasoning: string[];
+  currentBarIndex: number;
+  visibleEvents: EventLogItem[];
+  visibleAnnotations: Annotation[];
+  lastReplyEval: {
+    stage: ReplayStageId;
+    canReply: boolean;
+    explanation: string;
+  };
+}
+
+export interface ReplayDatasetAnalysis {
   datasetId: string;
   symbol: string;
   timeframeBars: Record<Timeframe, OhlcvBar[]>;
@@ -128,17 +143,12 @@ export interface ReplayAnalysis {
   bias: 'bullish' | 'bearish' | 'neutral';
   quality: 'strong' | 'acceptable' | 'weak' | 'invalid';
   selectedTradeDay: string;
-  stage: ReplayStageId;
-  canEnter: boolean;
-  statusBanner: string;
   invalidReasons: string[];
   missingConditions: string[];
-  currentReasoning: string[];
   nextExpectation: string;
   eventLog: EventLogItem[];
   ruleTrace: RuleTraceItem[];
   annotations: Annotation[];
-  currentBarIndex: number;
   replayStartIndex: number;
   replayEndIndex: number;
   stopPrice?: number;
@@ -151,9 +161,6 @@ export interface ReplayAnalysis {
   lod?: number;
   targetLevels: TradeLevel[];
   recommendedTarget?: 30 | 35 | 40 | 50;
-  lastReplyEval: {
-    stage: ReplayStageId;
-    canReply: boolean;
-    explanation: string;
-  };
 }
+
+export interface ReplayAnalysis extends ReplayDatasetAnalysis, ReplayVisibility {}

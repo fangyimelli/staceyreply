@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { loadDatasetManifest, loadParsedDataset } from './data/loadDatasets';
-import { buildReplayAnalysis } from './strategy/engine';
+import { buildReplayAnalysis, buildReplayDatasetAnalysis } from './strategy/engine';
 import type { DatasetManifestItem, ParsedDataset, ReplayMode, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
 import { ExplainPanel } from './ui/ExplainPanel';
@@ -8,10 +8,6 @@ import { nextStageStop } from './replay/engine';
 
 const tfs: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
 const speedOptions = [150, 400, 800];
-const ema = (values: number[], period: number) => {
-  const k = 2 / (period + 1); let prev = values[0] ?? 0;
-  return values.map((value) => (prev = value * k + prev * (1 - k)));
-};
 
 export default function App() {
   const [datasets] = useState<DatasetManifestItem[]>(loadDatasetManifest());
@@ -49,10 +45,15 @@ export default function App() {
     };
   }, [datasets, datasetId]);
 
-  const analysis = useMemo(() => {
+  const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
-    return buildReplayAnalysis(activeDataset.datasetId, activeDataset.symbol, activeDataset.bars1m, currentBarIndex);
-  }, [activeDataset, currentBarIndex]);
+    return buildReplayDatasetAnalysis(activeDataset.datasetId, activeDataset.symbol, activeDataset.bars1m);
+  }, [activeDataset]);
+
+  const analysis = useMemo(() => {
+    if (!datasetAnalysis) return null;
+    return buildReplayAnalysis(datasetAnalysis, currentBarIndex);
+  }, [datasetAnalysis, currentBarIndex]);
 
   useEffect(() => {
     if (!analysis || !activeDataset) return;
@@ -73,6 +74,18 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [mode, currentBarIndex, analysis, speed]);
 
+  const currentReplayTime = activeDataset?.bars1m[Math.min(currentBarIndex, Math.max((activeDataset?.bars1m.length ?? 1) - 1, 0))]?.time;
+  const bars = useMemo(() => {
+    if (!analysis) return [];
+    return analysis.timeframeBars[timeframe].filter((bar) => new Date(bar.time).getTime() <= new Date(currentReplayTime ?? bar.time).getTime());
+  }, [analysis, timeframe, currentReplayTime]);
+  const ema20 = useMemo(() => {
+    const k = 2 / (20 + 1);
+    let prev = bars[0]?.close ?? 0;
+    return bars.map((bar) => (prev = bar.close * k + prev * (1 - k)));
+  }, [bars]);
+  const visibleAnnotations = analysis?.visibleAnnotations ?? [];
+
   if (!activeDataset || !analysis) {
     return <div className="app-shell">
       <header>
@@ -87,10 +100,6 @@ export default function App() {
       </section>
     </div>;
   }
-
-  const bars = analysis.timeframeBars[timeframe].filter((bar) => new Date(bar.time).getTime() <= new Date(activeDataset.bars1m[Math.min(currentBarIndex, activeDataset.bars1m.length - 1)]?.time ?? bar.time).getTime());
-  const ema20 = ema(bars.map((bar) => bar.close), 20);
-  const visibleAnnotations = analysis.annotations.filter((annotation) => annotation.visibleFromIndex <= currentBarIndex);
 
   const resetReplay = () => { setMode('pause'); setCurrentBarIndex(analysis.replayStartIndex); };
   const nextStep = () => {
@@ -124,7 +133,7 @@ export default function App() {
       <div>Gate: {analysis.lastReplyEval.explanation}</div>
     </section>
     <main className="main-grid">
-      <ChartPanel bars={bars} ema20={ema20} annotations={visibleAnnotations} replayMarkerTime={activeDataset.bars1m[currentBarIndex]?.time} previousClose={analysis.previousClose} hos={analysis.hos} los={analysis.los} hod={analysis.hod} lod={analysis.lod} statusBanner={analysis.statusBanner} />
+      <ChartPanel bars={bars} ema20={ema20} annotations={visibleAnnotations} replayMarkerTime={currentReplayTime} previousClose={analysis.previousClose} hos={analysis.hos} los={analysis.los} hod={analysis.hod} lod={analysis.lod} statusBanner={analysis.statusBanner} />
       <ExplainPanel analysis={{ ...analysis, currentBarIndex }} />
     </main>
     <section className="footer-grid">
