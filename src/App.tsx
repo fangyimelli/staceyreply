@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { buildSampleDatasetsResponse, loadDatasets, toSymbolDatasets, type BackendDatasetsResponse } from './data/loadDatasets';
 import { formatFrontendScreenedPayload } from './result/formatter';
+import { buildReplayDayAnalysis, buildStaticSymbolAnalysis, resolveSelectedDay } from './strategy/precompute';
 import type { FrontendScreenedPayload, ReplayState, ReplyMode, StrategyLine, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
 import { formatDebugArtifacts, formatDebugPayload } from './ui/debugFormat';
@@ -52,35 +53,70 @@ export default function App() {
   const activeRecord = useMemo(() => datasetResponse.datasets.find((dataset) => dataset.pair === symbol) ?? datasetResponse.datasets[0], [datasetResponse, symbol]);
   const hasReplayableBars = activeDataset?.bars1m.length > 0;
 
+  const staticAnalysisBySymbol = useMemo(
+    () => Object.fromEntries(
+      datasets.map((dataset) => [
+        dataset.symbol,
+        buildStaticSymbolAnalysis(dataset, replyMode, { enableFGD, enableFRD }),
+      ]),
+    ),
+    [datasets, replyMode, enableFGD, enableFRD],
+  );
+
+  const importedDates = useMemo(() => (activeDataset?.importedSignals ?? []).map((row) => row.date), [activeDataset]);
+  const screenedDatesForActive = useMemo(
+    () => (staticAnalysisBySymbol[activeDataset?.symbol ?? '']?.candidateAnalysis ?? [])
+      .filter((analysis) => analysis.dayAnalysis.explain.entryAllowed)
+      .map((analysis) => analysis.candidate.date),
+    [staticAnalysisBySymbol, activeDataset],
+  );
+  const resolvedSelection = useMemo(
+    () => resolveSelectedDay({
+      dataset: activeDataset,
+      importedDates,
+      timeframe: tf,
+      practiceOnly,
+      screenedDates: screenedDatesForActive,
+      requestedDate: selectedDate,
+    }),
+    [activeDataset, importedDates, tf, practiceOnly, screenedDatesForActive, selectedDate],
+  );
+
+  const replayDayAnalysis = useMemo(
+    () => buildReplayDayAnalysis({
+      dataset: activeDataset,
+      selectedDay: resolvedSelection.selectedDay,
+      line,
+      replyMode,
+      manualTrade: { entry: Number(manualEntry), exit: Number(manualExit) },
+    }),
+    [activeDataset, resolvedSelection.selectedDay, line, replyMode, manualEntry, manualExit],
+  );
+
   const formatted = useMemo(
     () =>
       formatFrontendScreenedPayload({
         datasets,
-        lineFilter: { enableFGD, enableFRD },
+        staticAnalysisBySymbol,
         replyMode,
         symbol,
         timeframe: tf,
-        line,
         practiceOnly,
-        selectedDate,
-        manualTrade: { entry: Number(manualEntry), exit: Number(manualExit) },
-        replayWindow: {
-          currentBarIndex: replayState.currentBarIndex,
-          replayStartIndex: replayState.replayStartIndex,
-          replayEndIndex: replayState.replayEndIndex,
-        },
+        selectedDay: resolvedSelection.selectedDay,
+        replayDayAnalysis,
+        currentBarIndex: replayState.currentBarIndex,
       }),
-    [datasets, enableFGD, enableFRD, replyMode, symbol, tf, line, practiceOnly, selectedDate, manualEntry, manualExit, replayState.currentBarIndex, replayState.replayStartIndex, replayState.replayEndIndex],
+    [datasets, staticAnalysisBySymbol, replyMode, symbol, tf, practiceOnly, resolvedSelection.selectedDay, replayDayAnalysis, replayState.currentBarIndex],
   );
   const uiPayload: FrontendScreenedPayload = formatted.payload;
   const screenedResults = uiPayload.screenedResults;
-  const importedSignalRows = activeDataset?.importedSignals ?? [];
+  const importedSignalRows = uiPayload.importedSignalRows;
   const day = uiPayload.selectedDay;
 
   useEffect(() => {
     setReplayState((current) => {
-      const nextStart = uiPayload.replayDefaults.replayStartIndex;
-      const nextEnd = uiPayload.replayDefaults.replayEndIndex;
+      const nextStart = replayDayAnalysis?.replayStartIndex ?? 0;
+      const nextEnd = replayDayAnalysis?.replayEndIndex ?? 0;
       const shouldReset =
         current.replayStartIndex !== nextStart ||
         current.replayEndIndex !== nextEnd ||
@@ -98,7 +134,7 @@ export default function App() {
         replayEndIndex: nextEnd,
       };
     });
-  }, [uiPayload.replayDefaults.replayStartIndex, uiPayload.replayDefaults.replayEndIndex, day]);
+  }, [replayDayAnalysis?.key]);
 
   useEffect(() => {
     if (!replayState.isPlaying || replayState.isFinished || !hasReplayableBars) return undefined;

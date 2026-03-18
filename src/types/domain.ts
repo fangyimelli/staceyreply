@@ -195,6 +195,34 @@ export interface DebugArtifacts {
   }>;
 }
 
+
+export interface StaticSymbolAnalysis {
+  symbol: string;
+  context: StrategyPreprocessingContext;
+  candidates: CandidateDate[];
+  candidateAnalysis: InternalCandidateAnalysis[];
+}
+
+export interface ReplaySnapshot {
+  currentBarIndex: number;
+  dayAnalysis: InternalDayAnalysis;
+  revealedBars: OhlcvBar[];
+  revealedEma20: number[];
+}
+
+export interface ReplayDayAnalysis {
+  key: string;
+  symbol: string;
+  day: string;
+  line: StrategyLine;
+  replyMode: ReplyMode;
+  replayStartIndex: number;
+  replayEndIndex: number;
+  replayScopeLabel: string;
+  fullDayBars: OhlcvBar[];
+  snapshots: ReplaySnapshot[];
+}
+
 export interface ReplayState {
   isPlaying: boolean;
   isFinished: boolean;

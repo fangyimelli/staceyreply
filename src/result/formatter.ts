@@ -1,21 +1,18 @@
-import { aggregateFrom1m, ema } from '../aggregation/timeframe';
-import {
-  buildStrategyPreprocessingContext,
-  detectCandidates,
-  evaluateDay,
-} from '../strategy/engine';
+import { aggregateFrom1m } from '../aggregation/timeframe';
 import type {
   DebugPayload,
   FrontendScreenedPayload,
   ImportedSignalRow,
   InternalCandidateAnalysis,
-  OhlcvBar,
+  ReplayDayAnalysis,
   ReplyMode,
   ScreenedResultRow,
-  StrategyLine,
+  StaticSymbolAnalysis,
   SymbolDataset,
   Timeframe,
 } from '../types/domain';
+
+const replayScopeLabel = "Day 3 replay starts from the selected NY day's first intraday bar and ends at that day's last intraday bar.";
 
 const emptyPayload = (): { payload: FrontendScreenedPayload; debug: DebugPayload } => ({
   payload: {
@@ -49,7 +46,7 @@ const emptyPayload = (): { payload: FrontendScreenedPayload; debug: DebugPayload
     },
     replayMeta: {
       currentBarIndex: 0,
-      scopeLabel: "Day 3 replay starts from the selected NY day's first intraday bar and ends at that day's last intraday bar.",
+      scopeLabel: replayScopeLabel,
     },
   },
   debug: {
@@ -60,15 +57,14 @@ const emptyPayload = (): { payload: FrontendScreenedPayload; debug: DebugPayload
 
 interface FormatterConfig {
   datasets: SymbolDataset[];
-  lineFilter: { enableFGD: boolean; enableFRD: boolean };
+  staticAnalysisBySymbol: Record<string, StaticSymbolAnalysis>;
   replyMode: ReplyMode;
   symbol: string;
   timeframe: Timeframe;
-  line: StrategyLine;
   practiceOnly: boolean;
-  selectedDate?: string;
-  manualTrade: { entry: number; exit: number };
-  replayWindow?: { currentBarIndex: number; replayStartIndex: number; replayEndIndex: number };
+  selectedDay?: string;
+  replayDayAnalysis?: ReplayDayAnalysis;
+  currentBarIndex: number;
 }
 
 const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode): ScreenedResultRow => {
@@ -96,60 +92,24 @@ const toImportedSignalRow = (analysis: InternalCandidateAnalysis): ImportedSigna
   notes: 'Derived candidate from frontend analysis over replayable 1m bars.',
 });
 
-const buildReplayPayload = (dayBars: OhlcvBar[], replayWindow?: FormatterConfig['replayWindow']) => {
-  const replayStartIndex = 0;
-  const replayEndIndex = Math.max(dayBars.length - 1, 0);
-  const requestedIndex = replayWindow?.currentBarIndex ?? replayStartIndex;
-  const boundedIndex = Math.min(Math.max(requestedIndex, replayStartIndex), replayEndIndex);
-  const currentBarIndex = dayBars.length ? boundedIndex : 0;
-  const revealedBars = dayBars.length ? dayBars.slice(0, currentBarIndex + 1) : [];
-
-  return {
-    replayStartIndex,
-    replayEndIndex,
-    currentBarIndex,
-    revealedBars,
-    replayScopeLabel: "Day 3 replay starts from the selected NY day's first intraday bar and ends at that day's last intraday bar.",
-  };
-};
-
 const emptyDayAnalysis = emptyPayload().payload.dayAnalysis;
 
 export const formatFrontendScreenedPayload = (config: FormatterConfig): { payload: FrontendScreenedPayload; debug: DebugPayload } => {
-  const { datasets, lineFilter, replyMode, symbol, timeframe, line, practiceOnly, selectedDate, manualTrade, replayWindow } = config;
+  const { datasets, staticAnalysisBySymbol, replyMode, symbol, timeframe, practiceOnly, selectedDay, replayDayAnalysis, currentBarIndex } = config;
 
   if (datasets.length === 0) return emptyPayload();
 
-  const preprocessingBySymbol = Object.fromEntries(
-    datasets.map((dataset) => [
-      dataset.symbol,
-      buildStrategyPreprocessingContext(dataset.bars1m),
-    ])
-  );
-
-  const internalCandidateAnalysis = datasets.flatMap((dataset) => {
-    const context = preprocessingBySymbol[dataset.symbol];
-    const candidates = detectCandidates(dataset.symbol, context).filter(
-      (candidate) => (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD)
-    );
-
-    return candidates.map((candidate) => ({
-      symbol: dataset.symbol,
-      candidate,
-      dayAnalysis: evaluateDay(candidate.type, candidate.date, replyMode, { entry: 0, exit: 0 }, context, dataset.symbol),
-    }));
-  });
-
   const active = datasets.find((dataset) => dataset.symbol === symbol) ?? datasets[0];
+  const activeStatic = staticAnalysisBySymbol[active.symbol];
+  const internalCandidateAnalysis = Object.values(staticAnalysisBySymbol).flatMap((analysis) => analysis.candidateAnalysis);
   const importedSignalRows = active.importedSignals.length
     ? active.importedSignals
-    : internalCandidateAnalysis.filter((analysis) => analysis.symbol === active.symbol).map((analysis) => toImportedSignalRow(analysis));
+    : (activeStatic?.candidateAnalysis ?? []).map((analysis) => toImportedSignalRow(analysis));
   const screenedResults = internalCandidateAnalysis.map((analysis) => toScreenedRow(analysis, replyMode)).filter((row) => row.validity === 'pass');
-
   const bars = active.bars1m.length > 0 ? aggregateFrom1m(active.bars1m, timeframe) : [];
-  const allDayChoices = [...new Set(bars.map((bar) => bar.time.slice(0, 10)))];
   const screenedDayChoices = screenedResults.filter((row) => row.symbol === active.symbol).map((row) => row.candidateDate);
   const fallbackImportedDates = importedSignalRows.map((row) => row.date);
+  const allDayChoices = [...new Set(bars.map((bar) => bar.time.slice(0, 10)))];
   const dayChoices = practiceOnly
     ? screenedDayChoices.length
       ? screenedDayChoices
@@ -157,13 +117,14 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
     : allDayChoices.length
       ? allDayChoices
       : fallbackImportedDates;
-  const selectedDayValue = selectedDate || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10) || importedSignalRows[0]?.date || '';
+  const selectedDayValue = selectedDay || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10) || importedSignalRows[0]?.date || '';
 
-  const fullDayBars = bars.filter((bar) => bar.time.slice(0, 10) === selectedDayValue);
-  const replayPayload = buildReplayPayload(fullDayBars, replayWindow);
-  const revealedDayBars1m = active.bars1m.filter((bar) => bar.time <= (replayPayload.revealedBars[replayPayload.revealedBars.length - 1]?.time ?? ''));
-  const activeContext = buildStrategyPreprocessingContext(revealedDayBars1m);
-  const dayAnalysis = evaluateDay(line, selectedDayValue, replyMode, manualTrade, activeContext, active.symbol);
+  const replayStartIndex = replayDayAnalysis?.replayStartIndex ?? 0;
+  const replayEndIndex = replayDayAnalysis?.replayEndIndex ?? 0;
+  const boundedIndex = replayDayAnalysis
+    ? Math.min(Math.max(currentBarIndex, replayStartIndex), replayEndIndex)
+    : 0;
+  const currentSnapshot = replayDayAnalysis?.snapshots[boundedIndex];
 
   return {
     payload: {
@@ -173,22 +134,22 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
       bars,
       dayChoices,
       selectedDay: selectedDayValue,
-      fullDayBars,
-      revealedBars: replayPayload.revealedBars,
-      revealedEma20: ema(replayPayload.revealedBars, 20),
-      dayAnalysis,
+      fullDayBars: replayDayAnalysis?.fullDayBars ?? [],
+      revealedBars: currentSnapshot?.revealedBars ?? [],
+      revealedEma20: currentSnapshot?.revealedEma20 ?? [],
+      dayAnalysis: currentSnapshot?.dayAnalysis ?? emptyDayAnalysis,
       replayDefaults: {
-        replayStartIndex: replayPayload.replayStartIndex,
-        replayEndIndex: replayPayload.replayEndIndex,
+        replayStartIndex,
+        replayEndIndex,
       },
       replayMeta: {
-        currentBarIndex: replayPayload.currentBarIndex,
-        scopeLabel: replayPayload.replayScopeLabel,
+        currentBarIndex: boundedIndex,
+        scopeLabel: replayDayAnalysis?.replayScopeLabel ?? replayScopeLabel,
       },
     },
     debug: {
       candidatesBySymbol: Object.fromEntries(
-        datasets.map((dataset) => [dataset.symbol, detectCandidates(dataset.symbol, preprocessingBySymbol[dataset.symbol])])
+        Object.entries(staticAnalysisBySymbol).map(([datasetSymbol, analysis]) => [datasetSymbol, analysis.candidates]),
       ),
       internalCandidateAnalysis,
     },
