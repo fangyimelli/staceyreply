@@ -17,20 +17,12 @@ Local single-page app for Day 3 practice / reply workflow. The current productio
 
 ## Confirmed features
 
-Only features that are currently implemented in the shipped UI are listed here.
-
-- Auto-load built-in sample data from `sample/frd_fgd_three_day_windows.csv`, with fallback to in-memory `SAMPLE` bars when that file is unavailable.
-- Upload one or more local `.csv` / `.json` files and derive symbols from the uploaded file names.
-- Switch active symbol with the symbol dropdown.
-- Switch timeframe with the timeframe dropdown: `1m / 5m / 15m / 1h / 4h / 1D`.
-- Filter candidate dates with `FGD on`, `FRD on`, and `Practice mode (filtered dates only)`.
-- Switch strategy line between `FGD` and `FRD`.
-- Switch reply mode between `Auto Reply` and `Manual Reply`.
-- In manual mode, enter `entry` and `exit`, then use **Apply trade to PnL** to accumulate total PnL.
-- Review final screened rows in the **Screened Results (Final)** table.
-- Open the **Debug Panel (Intermediate Artifacts)** with the `Debug panel` checkbox.
-- Review rule-traceable reasoning, intraday evidence, target tiers, missing conditions, and PnL in the **Explain Panel**.
-- Review chart overlays currently rendered in the app: close line, `20EMA`, `previous close`, `HOS`, `LOS`, `HOD`, `LOD`, plus annotation markers.
+- React + `src/main.tsx` is the only application entrypoint and local startup path.
+- Daily template evaluation for FGD / FRD with rule-traceable pass/fail output.
+- Intraday evaluation now exposes: source, stop hunt, 123 node 1/2/3, 20EMA confirm, entry/stop, and fixed TP30/35/40/50 annotations with rule-traceable hover evidence.
+- Explain panel shows template classification, bias, stage, missing conditions, can-enter / cannot-enter reasons, and per-rule pass/fail evidence.
+- Pip-aware scoring now converts prices by symbol/decimals, blocks entries when stop distance exceeds 20 pips, and grades fixed TP30/35/40/50 targets with missing-condition feedback.
+- Local sample mode, local CSV/JSON upload, and acceptance-checklist-oriented workflow remain supported.
 
 ---
 
@@ -79,7 +71,122 @@ If you want a production build instead:
 - On first load, the app tries to load built-in sample data automatically.
 - To replace it, use the file input in the top control row and choose one or more `.csv` / `.json` files.
 
-### 2) Switch product / symbol
+## Debug Guide (Development)
+
+### Mode visibility boundaries (Normal vs Debug)
+- **Normal mode:** displays final screened results only (selected candidate outcomes, final explain state, final chart annotations used for user decisions).
+- **Debug mode:** additionally surfaces intermediate internals, including candidate screening traces, rejected dates, and rule-state transitions.
+- Keep debugging focused on traceability: each exposed debug state should map back to a specific rule or pipeline stage.
+
+### Internal analysis pipeline (for tracing)
+1. CSV parsing
+2. Timeframe rebuild
+3. FRD/FGD screening
+4. Day-state classification
+5. Replay checkpoint generation
+6. Auto/Manual state preparation
+7. Final result packaging for UI
+
+Uploaded CSV/folder data runs through this pipeline first and is treated as the primary source for real analysis. Built-in sample datasets remain available for immediate demo use.
+
+### Expected CSV format
+- Header must include exactly: `time,open,high,low,close,volume`.
+- `time` should be parseable by JavaScript `Date` (ISO timestamp recommended).
+- Parser location: `src/parser/parseLocalData.ts`.
+
+### Timezone assumptions
+- Session window logic in strategy uses `America/New_York` conversion for `07:00` to `11:00` checks.
+- Time bucketing for aggregation currently uses UTC-derived minute grouping.
+
+### How 1m is aggregated into 5m / 15m / 1h / 4h / 1D
+1. Select timeframe key based on bar timestamp.
+2. Group bars by timeframe bucket key.
+3. Emit OHLCV per group:
+   - open = first open
+   - high = max high
+   - low = min low
+   - close = last close
+   - volume = sum
+4. Aggregation location: `src/aggregation/timeframe.ts`.
+
+### Where each logic layer lives
+- Parser logic: `src/parser/parseLocalData.ts`
+- Aggregation logic: `src/aggregation/timeframe.ts`
+- Strategy engine logic: `src/strategy/engine.ts`
+- Annotation construction: `src/strategy/engine.ts` (returned `annotations`)
+- UI composition/state: `src/App.tsx`
+- Chart rendering: `src/ui/ChartPanel.tsx`
+- Explain panel rendering: `src/ui/ExplainPanel.tsx`
+
+### Inspect computed FRD / FGD candidate dates
+1. Upload files.
+2. Observe `Detected candidate dates` line in UI.
+3. For code-level inspection, set breakpoint/log in `detectCandidates(...)` in `src/strategy/engine.ts`.
+
+### Inspect selected Day 3 state
+1. Confirm day dropdown selection in UI.
+2. Check `dayChoices` + `selectedDate` resolution in `src/App.tsx`.
+3. Validate filtered/practice behavior by toggling `practiceOnly`, `enableFGD`, `enableFRD`.
+
+### Inspect source / stop hunt / 123 / entry detection
+1. Place breakpoints inside `evaluateDay(...)` in `src/strategy/engine.ts`.
+2. Inspect variables in order: `source`, `stopHunt`, `oneTwoThree`, `entry`, `stop`, `entryAllowed`.
+3. Compare with explain panel `missing` list.
+
+### Inspect Auto trade simulation
+1. Set mode to Auto.
+2. Inspect `trade` branch in `evaluateDay(...)` when `mode==='auto' && entryAllowed`.
+3. Confirm target-derived exit and computed `pnlPips`.
+
+### Inspect Manual trade simulation
+1. Set mode to Manual.
+2. Enter numeric entry/exit.
+3. Inspect `trade` branch in `evaluateDay(...)` when `mode==='manual'`.
+4. Confirm side-aware pip calculation.
+
+### Replay architecture requirement
+Replay implementation should remain layered and explicit:
+- replay engine / replay state module
+- checkpoint detector module
+- chart state overlay module
+- strategy engine with day-state classification + partial-history evaluation
+- annotations with checkpoint-aware rendering
+- explain panel consuming replay state (no ad hoc UI-only recomputation)
+
+### Replay debugging: incorrect state transitions
+When state transitions look wrong:
+1. Confirm replay cursor index and visible-bar window are aligned.
+2. Confirm checkpoint detector evaluates only revealed bars.
+3. Verify state labels map to exact checkpoint IDs.
+4. Compare explain panel state against replay-state source object.
+5. Verify no future-bar leakage in strategy state evaluation.
+
+### Verify D-1 body 40 pips and 60% body/range checks
+1. Identify D-1 candle open, close, high, low in day aggregation.
+2. Compute body pips: `abs(close-open)` converted to pips.
+3. Compute range pips: `high-low` converted to pips.
+4. Compute body ratio: `body / range`.
+5. Check thresholds:
+   - `body >= 40 pips`
+   - `body/range >= 0.60`
+6. Confirm checkpoint labels and explain panel fields reflect these exact values.
+
+### Verify Pump Day / Dump Day / FRD / FGD transitions
+1. Validate daily sequence across context day, signal day, and Day 3.
+2. Confirm Pump/Dump completion checkpoints trigger on intended daily state.
+3. Confirm `Possible FRD/FGD tomorrow` checkpoints occur before signal-day confirmation.
+4. Confirm FRD/FGD signal-day detected checkpoint only fires when strategy criteria are met from revealed data.
+5. Confirm Day 3 begin checkpoint aligns with selected Day 3 start jump control.
+
+### Common failure cases and how to debug
+1. Empty/NaN chart values:
+   - Check CSV headers and numeric parsing in `parseCsv`.
+2. Candidate list empty unexpectedly:
+   - Verify daily aggregation and candidate predicates in `detectCandidates`.
+3. Explain panel says setup incomplete:
+   - Verify `missing` checkpoints in `evaluateDay`.
+4. Wrong timeframe shape:
+   - Validate bucket keys in `key(...)` and grouped output in `aggregate(...)`.
 
 - Use the symbol dropdown immediately to the right of the file input.
 - The dropdown options come from the current dataset list.

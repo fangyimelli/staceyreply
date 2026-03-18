@@ -1,141 +1,124 @@
-import type { ExplainState, Trade } from "../types/domain";
+import type { ExplainState, Trade } from '../types/domain';
 
-const renderEvidence = (
-  prices: Record<string, number>,
-  times: Record<string, string>,
-) => {
-  const priceBits = Object.entries(prices).map(
-    ([key, value]) => `${key}=${value}`,
-  );
-  const timeBits = Object.entries(times).map(
-    ([key, value]) => `${key}=${value}`,
-  );
-  return [...priceBits, ...timeBits].join(", ");
+const renderEvidence = (prices: Record<string, number>, times: Record<string, string>) => {
+  const priceBits = Object.entries(prices).map(([key, value]) => `${key}=${value}`);
+  const timeBits = Object.entries(times).map(([key, value]) => `${key}=${value}`);
+  return [...priceBits, ...timeBits].join(', ');
 };
 
-export function ExplainPanel({
-  explain,
-  trade,
-  totalPnl,
-}: {
-  explain: ExplainState;
-  trade?: Trade;
-  totalPnl: number;
-}) {
+export function ExplainPanel({ explain, trade, totalPnl }: { explain: ExplainState; trade?: Trade; totalPnl: number }) {
+  const canEnterReasons = explain.reasons.filter((reason) => /allow|qualified|passed|detected|aligned/i.test(reason));
+  const cannotEnterReasons = explain.missingConditions;
+
   return (
     <aside
       style={{
         width: 420,
         padding: 12,
-        borderLeft: "1px solid #e2e8f0",
-        overflow: "auto",
+        borderLeft: '1px solid #e2e8f0',
+        overflow: 'auto',
       }}
     >
       <h3>Explain Panel</h3>
       <p>
-        <strong>Template:</strong> {explain.template}
+        <strong>模板分類:</strong> {explain.template}
       </p>
       <p>
         <strong>Bias:</strong> {explain.bias}
       </p>
       <p>
-        <strong>Current Stage:</strong> {explain.stage}
+        <strong>階段:</strong> {explain.stage}
       </p>
       <p>
-        <strong>Entry status:</strong>{" "}
-        {explain.entryAllowed ? "Allowed" : "Not allowed now"}
+        <strong>可進/不可進:</strong> {explain.entryAllowed ? '可進' : '不可進'}
       </p>
       <p>
-        <strong>Recommended target:</strong>{" "}
-        {explain.targetTier ? `${explain.targetTier} pips` : "none"}
+        <strong>目前 target tier:</strong> {explain.targetTier ? `${explain.targetTier} pips` : 'none'}
       </p>
-      <h4>Why classification / stage</h4>
+
+      <h4>可進原因</h4>
       <ul>
-        {explain.reasons.map((r) => (
-          <li key={r}>{r}</li>
+        {(canEnterReasons.length ? canEnterReasons : ['尚未達成可進條件']).map((reason) => (
+          <li key={reason}>{reason}</li>
         ))}
       </ul>
+
+      <h4>尚缺條件 / 不可進原因</h4>
+      <ul>
+        {(cannotEnterReasons.length ? cannotEnterReasons : ['目前沒有缺失條件']).map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
+
+      <h4>Rule-trace summary</h4>
+      <ul>
+        {explain.reasons.map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
+
       <h4>判斷依據明細</h4>
       <ul>
         {explain.evidenceDetails.map((detail) => (
           <li key={detail}>{detail}</li>
         ))}
       </ul>
+
       <h4>Intraday rule summary</h4>
       <ul>
         <li>
-          <strong>Source:</strong>{" "}
-          {explain.intraday?.source
-            ? `${explain.intraday.source.barTime} @ ${explain.intraday.source.price}`
-            : "n/a"}
+          <strong>Source:</strong>{' '}
+          {explain.intraday?.source ? `${explain.intraday.source.barTime} @ ${explain.intraday.source.price}` : 'n/a'}
         </li>
         <li>
-          <strong>Stop hunt:</strong>{" "}
+          <strong>Stop hunt:</strong>{' '}
           {explain.intraday?.stopHunt
             ? `${explain.intraday.stopHunt.sweptLevel.barTime} @ ${explain.intraday.stopHunt.sweptLevel.price} → ${explain.intraday.stopHunt.reclaim.barTime} @ ${explain.intraday.stopHunt.reclaim.price}`
-            : "n/a"}
+            : 'n/a'}
         </li>
         <li>
-          <strong>123:</strong>{" "}
+          <strong>123:</strong>{' '}
           {explain.intraday?.pattern123
-            ? `1=${explain.intraday.pattern123.node1?.barTime ?? "n/a"} @ ${explain.intraday.pattern123.node1?.price ?? "n/a"}, 2=${explain.intraday.pattern123.node2?.barTime ?? "n/a"} @ ${explain.intraday.pattern123.node2?.price ?? "n/a"}, 3=${explain.intraday.pattern123.node3?.barTime ?? "n/a"} @ ${explain.intraday.pattern123.node3?.price ?? "n/a"}, breakout=${explain.intraday.pattern123.breakout?.barTime ?? "n/a"} @ ${explain.intraday.pattern123.breakout?.price ?? "n/a"}`
-            : "n/a"}
+            ? `1=${explain.intraday.pattern123.node1?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.node1?.price ?? 'n/a'}, 2=${explain.intraday.pattern123.node2?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.node2?.price ?? 'n/a'}, 3=${explain.intraday.pattern123.node3?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.node3?.price ?? 'n/a'}, breakout=${explain.intraday.pattern123.breakout?.barTime ?? 'n/a'} @ ${explain.intraday.pattern123.breakout?.price ?? 'n/a'}`
+            : 'n/a'}
         </li>
         <li>
-          <strong>move30:</strong>{" "}
-          {explain.intraday
-            ? `${explain.intraday.move30Pips.toFixed(1)} pips`
-            : "n/a"}
+          <strong>20EMA confirm:</strong>{' '}
+          {explain.intraday?.emaConfirm ? `${explain.intraday.emaConfirm.barTime} @ ${explain.intraday.emaConfirm.price}` : 'n/a'}
         </li>
         <li>
-          <strong>Rotation:</strong>{" "}
-          {explain.intraday?.rotationTagged ? "yes" : "no"}
+          <strong>Move30:</strong> {explain.intraday ? `${explain.intraday.move30Pips.toFixed(1)} pips` : 'n/a'}
         </li>
         <li>
-          <strong>Engulfment:</strong>{" "}
-          {explain.intraday?.engulfment ? "yes" : "no"}
+          <strong>Rotation:</strong> {explain.intraday?.rotationTagged ? 'yes' : 'no'}
+        </li>
+        <li>
+          <strong>Engulfment:</strong> {explain.intraday?.engulfment ? 'yes' : 'no'}
         </li>
       </ul>
+
       <h4>Target tiers</h4>
       <ul>
         {explain.targetAssessments.map((assessment) => (
           <li key={assessment.tier}>
-            <strong>TP{assessment.tier}:</strong> {assessment.reached ? "reached" : "not yet"} — target={assessment.targetPrice.toFixed(5)} — {assessment.description}
-            {!assessment.reached && assessment.missing.length ? (
-              <div style={{ color: "#475569" }}>Missing: {assessment.missing.join(", ")}</div>
-            ) : null}
+            <strong>TP{assessment.tier}:</strong> {assessment.reached ? 'reached' : 'not yet'} — target={assessment.targetPrice.toFixed(5)} — {assessment.description}
+            {!assessment.reached && assessment.missing.length ? <div style={{ color: '#475569' }}>Missing: {assessment.missing.join(', ')}</div> : null}
           </li>
         ))}
       </ul>
-      <h4>Missing conditions</h4>
-      <ul>
-        {explain.missingConditions.map((m) => (
-          <li key={m}>{m}</li>
-        ))}
-      </ul>
+
       <h4>Rule Trace</h4>
       <ul>
         {explain.ruleTrace.map((item) => (
           <li key={item.ruleId}>
-            <strong>{item.ruleId}</strong>: {item.passed ? "PASS" : "FAIL"} —{" "}
-            {item.detail}
-            {renderEvidence(item.prices, item.times) ? (
-              <div style={{ color: "#475569" }}>
-                {renderEvidence(item.prices, item.times)}
-              </div>
-            ) : null}
+            <strong>{item.ruleId}</strong>: {item.passed ? 'PASS' : 'FAIL'} — {item.detail}
+            {renderEvidence(item.prices, item.times) ? <div style={{ color: '#475569' }}>{renderEvidence(item.prices, item.times)}</div> : null}
           </li>
         ))}
       </ul>
+
       <h4>PnL</h4>
-      {trade ? (
-        <p>
-          Last trade {trade.side}: {trade.pnlPips.toFixed(1)} pips ({trade.mode}
-          )
-        </p>
-      ) : (
-        <p>No trade executed yet.</p>
-      )}
+      {trade ? <p>Last trade {trade.side}: {trade.pnlPips.toFixed(1)} pips ({trade.mode})</p> : <p>No trade executed yet.</p>}
       <p>
         <strong>Total PnL:</strong> {totalPnl.toFixed(1)} pips
       </p>

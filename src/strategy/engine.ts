@@ -110,6 +110,14 @@ const pipsToPrice = (pips: number, pipConfig: PipConfig): number =>
 const dailyBucketKeyNy = (time: string): string =>
   new Date(time).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
+const formatLabel = (ruleId: string): string =>
+  ruleId
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const findTrace = (ruleTrace: RuleTraceItem[], ruleId: string): RuleTraceItem | undefined =>
+  ruleTrace.find((item) => item.ruleId === ruleId);
+
 const aggregateDailyNy = (bars1m: OhlcvBar[]): OhlcvBar[] => {
   const grouped = new Map<string, OhlcvBar[]>();
   bars1m.forEach((bar) => {
@@ -616,6 +624,35 @@ export const evaluateDay = (
   const los = Math.min(...dayBars.map((bar) => bar.open));
 
   const intraday = evaluateIntradayPatterns({ line, dayBars, pipPrecision: 4 });
+  const dayEma20 = ema(dayBars.map((bar) => bar.close), 20);
+  const emaConfirmIndex = dayBars.findIndex((bar, index) => {
+    const pivotIndex = intraday.pattern123?.breakout
+      ? dayBars.findIndex((candidate) => candidate.time === intraday.pattern123?.breakout?.barTime)
+      : intraday.source
+        ? dayBars.findIndex((candidate) => candidate.time === intraday.source?.barTime)
+        : -1;
+    if (pivotIndex >= 0 && index < pivotIndex) return false;
+    const emaValue = dayEma20[index];
+    // Assumption preserved explicitly: the prompt asks for a 20EMA confirm marker but does not define the exact candle test,
+    // so current behavior marks the first post-source/post-breakout bar that closes on the trend side of the 20EMA.
+    return line === "FGD" ? bar.close >= emaValue : bar.close <= emaValue;
+  });
+  const emaConfirmPoint = emaConfirmIndex >= 0
+    ? { barTime: dayBars[emaConfirmIndex].time, price: dayEma20[emaConfirmIndex] }
+    : undefined;
+  const emaConfirmTrace: RuleTraceItem = {
+    ruleId: "ema20-confirm",
+    passed: Boolean(emaConfirmPoint),
+    detail: emaConfirmPoint
+      ? `20EMA confirm detected with close ${line === "FGD" ? "above" : "below"} the EMA.`
+      : `20EMA confirm is still missing because no revealed bar has closed ${line === "FGD" ? "above" : "below"} the 20EMA after the setup pivot.`,
+    prices: emaConfirmPoint
+      ? { ema20: emaConfirmPoint.price, close: dayBars[emaConfirmIndex].close }
+      : {},
+    times: emaConfirmPoint
+      ? { confirmBar: emaConfirmPoint.barTime }
+      : {},
+  };
   const sourceBarTime = intraday.source?.barTime;
   const sourceBar = dayBars.find((bar) => bar.time === sourceBarTime);
   const sourceExtreme = line === "FGD"
@@ -652,6 +689,69 @@ export const evaluateDay = (
     ...assessment,
     targetPrice: fixedTargets[assessment.tier],
   }));
+  const entryQualifiedTrace: RuleTraceItem = {
+    ruleId: "entry-qualified",
+    passed: targetScore.entryAllowed,
+    detail: targetScore.entryAllowed
+      ? "Entry is allowed because the daily template, intraday structure, EMA confirm, and stop gate are aligned."
+      : "Entry is not allowed yet because one or more required gates are still missing.",
+    prices: { entry, stopPrice },
+    times: { entryBar: intraday.pattern123?.breakout?.barTime ?? sourceBar?.time ?? last.time },
+  };
+  const mergedRuleTrace = [
+    ...dailyTemplate.ruleTrace,
+    ...intraday.ruleTrace,
+    emaConfirmTrace,
+    {
+      ruleId: "stop-distance-pips",
+      passed: stopDistancePips <= 20,
+      detail:
+        stopDistancePips <= 20
+          ? "Stop distance is within the 20-pip gate."
+          : "Stop distance exceeds the 20-pip gate; skip entry.",
+      prices: {
+        entry,
+        sourceExtreme,
+        stopPrice,
+        stopDistancePips,
+        pipSize: pipConfig.pipSize,
+      },
+      times: { sourceBarTime: sourceBar?.time ?? last.time },
+    },
+    entryQualifiedTrace,
+    ...targetAssessments.map((assessment) => ({
+      ruleId: `target-tier-${assessment.tier}`,
+      passed: assessment.reached,
+      detail: `${assessment.description}${assessment.reached ? "" : ` Missing: ${assessment.missing.join(", ")}`}`,
+      prices: { targetPrice: assessment.targetPrice },
+      times: {},
+    })),
+  ];
+  const annotationTraceIds = {
+    source: "intraday-stop-hunt",
+    stopHunt: "intraday-stop-hunt",
+    point1: "intraday-123",
+    point2: "intraday-123",
+    point3: "intraday-123",
+    emaConfirm: "ema20-confirm",
+    entry: "entry-qualified",
+    stop: "stop-distance-pips",
+    tp30: "target-tier-30",
+    tp35: "target-tier-35",
+    tp40: "target-tier-40",
+    tp50: "target-tier-50",
+  } as const;
+  const withTrace = <T extends { kind: keyof typeof annotationTraceIds; ruleName: string; reasoning: string }>(annotation: T) => {
+    const trace = findTrace(mergedRuleTrace, annotationTraceIds[annotation.kind]);
+    return {
+      ...annotation,
+      ruleId: trace?.ruleId,
+      ruleName: trace ? formatLabel(trace.ruleId) : annotation.ruleName,
+      reasoning: trace?.detail ?? annotation.reasoning,
+      tracePrices: trace?.prices,
+      traceTimes: trace?.times,
+    };
+  };
 
   return {
     explain: {
@@ -661,11 +761,13 @@ export const evaluateDay = (
       missingConditions: [
         ...dailyTemplate.missingConditions,
         ...intraday.missingConditions,
+        ...(emaConfirmTrace.passed ? [] : [emaConfirmTrace.detail]),
         ...targetScore.missingConditions,
       ],
       reasons: [
         ...dailyTemplate.reasons,
         ...intraday.reasons,
+        ...(emaConfirmTrace.passed ? [emaConfirmTrace.detail] : []),
         ...targetScore.reasons,
       ],
       evidenceDetails: [
@@ -677,93 +779,76 @@ export const evaluateDay = (
       entryAllowed: targetScore.entryAllowed,
       targetTier: targetScore.currentTier,
       targetAssessments,
-      ruleTrace: [
-        ...dailyTemplate.ruleTrace,
-        ...intraday.ruleTrace,
-        {
-          ruleId: "stop-distance-pips",
-          passed: stopDistancePips <= 20,
-          detail:
-            stopDistancePips <= 20
-              ? "Stop distance is within the 20-pip gate."
-              : "Stop distance exceeds the 20-pip gate; skip entry.",
-          prices: {
-            entry,
-            sourceExtreme,
-            stopPrice,
-            stopDistancePips,
-            pipSize: pipConfig.pipSize,
-          },
-          times: { sourceBarTime: sourceBar?.time ?? last.time },
-        },
-        ...targetAssessments.map((assessment) => ({
-          ruleId: `target-tier-${assessment.tier}`,
-          passed: assessment.reached,
-          detail: `${assessment.description}${assessment.reached ? "" : ` Missing: ${assessment.missing.join(", ")}`}`,
-          prices: { targetPrice: assessment.targetPrice },
-          times: {},
-        })),
-      ],
+      ruleTrace: mergedRuleTrace,
       intraday: {
         source: intraday.source,
         stop: intraday.stop,
         stopHunt: intraday.stopHunt,
         pattern123: intraday.pattern123,
+        emaConfirm: emaConfirmPoint,
         move30Pips: intraday.move30Pips,
         rotationTagged: intraday.rotationTagged,
         engulfment: intraday.engulfment,
       },
     },
     annotations: [
-      ...intraday.annotations,
-      {
+      ...intraday.annotations.map((annotation) => withTrace(annotation)),
+      withTrace({
+        id: "ema20-confirm",
+        kind: "emaConfirm",
+        barTime: emaConfirmPoint?.barTime ?? last.time,
+        price: emaConfirmPoint?.price ?? dayEma20[dayEma20.length - 1] ?? last.close,
+        ruleName: "20EMA confirm",
+        reasoning: "20EMA confirmation derived from the revealed intraday sequence",
+      }),
+      withTrace({
         id: "entry",
         kind: "entry",
-        barTime: last.time,
+        barTime: intraday.pattern123?.breakout?.barTime ?? sourceBar?.time ?? last.time,
         price: entry,
         ruleName: "entry",
         reasoning: "Entry derived from reply mode and breakout/source context",
-      },
-      {
+      }),
+      withTrace({
         id: "stop-final",
         kind: "stop",
         barTime: sourceBar?.time ?? intraday.stop?.barTime ?? last.time,
         price: stopPrice,
         ruleName: "stop",
         reasoning: `Stop placed one pip outside source extreme (${sourceExtreme})`,
-      },
-      {
+      }),
+      withTrace({
         id: "tp30",
         kind: "tp30",
         barTime: last.time,
         price: fixedTargets[30],
         ruleName: "TP30",
         reasoning: "Fixed 30-pip target from entry",
-      },
-      {
+      }),
+      withTrace({
         id: "tp35",
         kind: "tp35",
         barTime: last.time,
         price: fixedTargets[35],
         ruleName: "TP35",
         reasoning: "Fixed 35-pip target from entry",
-      },
-      {
+      }),
+      withTrace({
         id: "tp40",
         kind: "tp40",
         barTime: last.time,
         price: fixedTargets[40],
         ruleName: "TP40",
         reasoning: "Fixed 40-pip target from entry",
-      },
-      {
+      }),
+      withTrace({
         id: "tp50",
         kind: "tp50",
         barTime: last.time,
         price: fixedTargets[50],
         ruleName: "TP50",
         reasoning: "Fixed 50-pip target from entry",
-      },
+      }),
     ],
     previousClose,
     hos,
