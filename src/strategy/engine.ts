@@ -394,6 +394,8 @@ const scoreTargetTiers = (params: {
   missingConditions: string[];
 } => {
   const { line, dailyTemplateAllowed, intraday, stopDistancePips } = params;
+  // Assumption preserved explicitly: scoreTargetTiers() is the real entry gate, and current product behavior
+  // does not require 20EMA confirm to unlock entry. EMA confirm is surfaced elsewhere as rule-traceable context.
   const coreRequirements = dailyTemplateAllowed
     ? []
     : [line === "FGD" ? "FGD daily template not complete" : "FRD daily template not complete"];
@@ -772,9 +774,11 @@ export const evaluateDay = (
   const entryQualifiedTrace: RuleTraceItem = {
     ruleId: "entry-qualified",
     passed: targetScore.entryAllowed,
+    // Assumption preserved explicitly: current entry gating follows scoreTargetTiers(), so 20EMA confirm stays informational
+    // until the product rules explicitly promote it into a hard requirement.
     detail: targetScore.entryAllowed
-      ? "Entry is allowed because the daily template, intraday structure, EMA confirm, and stop gate are aligned."
-      : "Entry is not allowed yet because one or more required gates are still missing.",
+      ? `Entry is allowed because the daily template, intraday structure, and stop gate are aligned${emaConfirmTrace.passed ? "; 20EMA confirm is also present." : "; 20EMA confirm is informational and still pending."}`
+      : "Entry is not allowed yet because one or more required gates from the daily template, intraday structure, or stop gate are still missing.",
     prices: { entry, stopPrice },
     times: { entryBar: intraday.pattern123?.breakout?.barTime ?? sourceBar?.time ?? last.time },
   };
@@ -841,13 +845,12 @@ export const evaluateDay = (
       missingConditions: [
         ...dailyTemplate.missingConditions,
         ...intraday.missingConditions,
-        ...(emaConfirmTrace.passed ? [] : [emaConfirmTrace.detail]),
         ...targetScore.missingConditions,
       ],
       reasons: [
         ...dailyTemplate.reasons,
         ...intraday.reasons,
-        ...(emaConfirmTrace.passed ? [emaConfirmTrace.detail] : []),
+        `20EMA confirm status: ${emaConfirmTrace.detail}`,
         ...targetScore.reasons,
       ],
       evidenceDetails: [

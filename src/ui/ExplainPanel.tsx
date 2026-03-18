@@ -43,7 +43,7 @@ export function ExplainPanel({ explain, trade, totalPnl }: { explain: ExplainSta
         ))}
       </ul>
 
-      <h4>尚缺條件 / 不可進原因</h4>
+      <h4>尚缺條件 / 不可進原因（僅列實際 entry gate）</h4>
       <ul>
         {(cannotEnterReasons.length ? cannotEnterReasons : ['目前沒有缺失條件']).map((reason) => (
           <li key={reason}>{reason}</li>
@@ -83,8 +83,8 @@ export function ExplainPanel({ explain, trade, totalPnl }: { explain: ExplainSta
             : 'n/a'}
         </li>
         <li>
-          <strong>20EMA confirm:</strong>{' '}
-          {explain.intraday?.emaConfirm ? `${explain.intraday.emaConfirm.barTime} @ ${explain.intraday.emaConfirm.price}` : 'n/a'}
+          <strong>20EMA confirm（輔助資訊）:</strong>{' '}
+          {explain.intraday?.emaConfirm ? `${explain.intraday.emaConfirm.barTime} @ ${explain.intraday.emaConfirm.price}` : 'pending / n/a'}
         </li>
         <li>
           <strong>Move30:</strong> {explain.intraday ? `${explain.intraday.move30Pips.toFixed(1)} pips` : 'n/a'}
