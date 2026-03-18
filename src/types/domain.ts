@@ -160,10 +160,12 @@ export interface ScreenedResultRow {
   symbol: string;
   candidateDate: string;
   lineType: StrategyLine;
-  validity: "pass" | "fail";
+  validity: "pass" | "fail" | "pending";
   replayAvailable: boolean;
   recommendedNextAction: string;
   currentTargetTier: 30 | 35 | 40 | 50 | null;
+  failReasonSummary?: string;
+  missingConditionsSummary?: string;
   debug?: ScreenedResultDebugPayload;
 }
 export interface ScreenedResultDebugPayload {
