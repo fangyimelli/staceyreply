@@ -11,6 +11,7 @@
 - [x] Support 1m / 5m / 15m / 1h / 4h / 1D
 - [x] Rebuild higher timeframes from 1m
 - [x] Use America/New_York timezone
+- [x] DST normalization keeps raw file unchanged while strategy session aligns to America/New_York
 - [x] Main chart must be a real candlestick chart
 - [x] Candles must have uniform TradingView-like thickness and spacing
 - [x] Chart must clearly display date/time on the x-axis
