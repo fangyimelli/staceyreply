@@ -14,8 +14,18 @@ export type ReplayStageId =
   | 'complete'
   | 'invalid';
 
+export interface TimeSemantics {
+  source: 'fixed-est-no-dst' | 'iso-offset' | 'unqualified-text';
+  strategy: 'america-new_york';
+}
+
 export interface OhlcvBar {
   time: string;
+  rawTimeText?: string;
+  rawDateText?: string;
+  sourceTime?: string;
+  normalizedTime?: string;
+  timeSemantics?: TimeSemantics;
   open: number;
   high: number;
   low: number;
