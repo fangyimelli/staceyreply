@@ -1,5 +1,9 @@
 import { aggregateFrom1m, ema } from '../aggregation/timeframe';
-import { detectCandidates, evaluateDay } from '../strategy/engine';
+import {
+  buildStrategyPreprocessingContext,
+  detectCandidates,
+  evaluateDay,
+} from '../strategy/engine';
 import type {
   DebugPayload,
   FrontendScreenedPayload,
@@ -116,16 +120,23 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
 
   if (datasets.length === 0) return emptyPayload();
 
-  const analyzableDatasets = datasets.filter((dataset) => dataset.bars1m.length > 0);
-  const internalCandidateAnalysis = analyzableDatasets.flatMap((dataset) => {
-    const candidates = detectCandidates(dataset.symbol, dataset.bars1m).filter(
-      (candidate) => (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD),
+  const preprocessingBySymbol = Object.fromEntries(
+    datasets.map((dataset) => [
+      dataset.symbol,
+      buildStrategyPreprocessingContext(dataset.bars1m),
+    ])
+  );
+
+  const internalCandidateAnalysis = datasets.flatMap((dataset) => {
+    const context = preprocessingBySymbol[dataset.symbol];
+    const candidates = detectCandidates(dataset.symbol, context).filter(
+      (candidate) => (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD)
     );
 
     return candidates.map((candidate) => ({
       symbol: dataset.symbol,
       candidate,
-      dayAnalysis: evaluateDay(candidate.type, dataset.bars1m, candidate.date, replyMode, { entry: 0, exit: 0 }, dataset.symbol),
+      dayAnalysis: evaluateDay(candidate.type, candidate.date, replyMode, { entry: 0, exit: 0 }, context, dataset.symbol),
     }));
   });
 
@@ -150,23 +161,9 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
 
   const fullDayBars = bars.filter((bar) => bar.time.slice(0, 10) === selectedDayValue);
   const replayPayload = buildReplayPayload(fullDayBars, replayWindow);
-  const lastRevealedTime = replayPayload.revealedBars[replayPayload.revealedBars.length - 1]?.time ?? '';
-  const revealedDayBars1m = active.bars1m.filter((bar) => bar.time <= lastRevealedTime);
-  const dayAnalysis = selectedDayValue && active.bars1m.length > 0
-    ? evaluateDay(line, revealedDayBars1m, selectedDayValue, replyMode, manualTrade, active.symbol)
-    : {
-        ...emptyDayAnalysis,
-        explain: {
-          ...emptyDayAnalysis.explain,
-          stage: active.bars1mStatus === 'metadata-only' ? 'Metadata imported; replay bars unavailable' : 'Sample/synthetic mode',
-          missingConditions: active.bars1mStatus === 'metadata-only'
-            ? ['Backend imported metadata only. Real replayable 1m bars are required before intraday chart/replay can run.']
-            : ['Current dataset is sample/synthetic and should not be mistaken for imported real 1m bars.'],
-          reasons: active.bars1mStatus === 'metadata-only'
-            ? ['Showing imported pair/date/signal summary only; frontend analysis waits for real 1m bars.']
-            : ['Showing sample/synthetic bars for local runnable fallback.'],
-        },
-      };
+  const revealedDayBars1m = active.bars1m.filter((bar) => bar.time <= (replayPayload.revealedBars[replayPayload.revealedBars.length - 1]?.time ?? ''));
+  const activeContext = buildStrategyPreprocessingContext(revealedDayBars1m);
+  const dayAnalysis = evaluateDay(line, selectedDayValue, replyMode, manualTrade, activeContext, active.symbol);
 
   return {
     payload: {
@@ -190,7 +187,9 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
       },
     },
     debug: {
-      candidatesBySymbol: Object.fromEntries(analyzableDatasets.map((dataset) => [dataset.symbol, detectCandidates(dataset.symbol, dataset.bars1m)])),
+      candidatesBySymbol: Object.fromEntries(
+        datasets.map((dataset) => [dataset.symbol, detectCandidates(dataset.symbol, preprocessingBySymbol[dataset.symbol])])
+      ),
       internalCandidateAnalysis,
     },
   };
