@@ -1,6 +1,20 @@
 export type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1D";
 export type StrategyLine = "FGD" | "FRD";
 export type ReplyMode = "auto" | "manual";
+export type AnnotationKind =
+  | "source"
+  | "stopHunt"
+  | "point1"
+  | "point2"
+  | "point3"
+  | "emaConfirm"
+  | "entry"
+  | "stop"
+  | "tp30"
+  | "tp35"
+  | "tp40"
+  | "tp50";
+
 export interface OhlcvBar {
   time: string;
   open: number;
@@ -69,6 +83,7 @@ export interface IntradayRuleSummary {
     node3?: IntradayPivotPoint;
     breakout?: IntradayPivotPoint;
   };
+  emaConfirm?: IntradayPivotPoint;
   move30Pips: number;
   rotationTagged: boolean;
   engulfment: boolean;
@@ -76,11 +91,14 @@ export interface IntradayRuleSummary {
 
 export interface InternalAnnotation {
   id: string;
-  kind: string;
+  kind: AnnotationKind;
   barTime: string;
   price: number;
+  ruleId?: string;
   ruleName: string;
   reasoning: string;
+  tracePrices?: Record<string, number>;
+  traceTimes?: Record<string, string>;
 }
 
 export interface InternalTrade {

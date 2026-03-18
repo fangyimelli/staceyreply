@@ -1,36 +1,26 @@
 # Stacey Burke / Sniper Day 3 Chart Reply (TypeScript SPA)
 
-Local single-page app for Day 3 practice/reply workflow. It loads local OHLCV CSV/JSON data, scans candidate dates first, and then lets you run Auto Reply or Manual Reply with cumulative PnL tracking.
+Local single-page app for Day 3 practice / reply workflow. The current production entry is the React + Vite app mounted from `index.html` → `src/main.tsx` → `src/App.tsx`.
 
 ---
 
-## What this app does
+## Actual app entry and runtime
 
-- Includes built-in symbols/datasets for immediate demo use without requiring any file upload.
-- Built-in default source now auto-loads `sample/frd_fgd_three_day_windows.csv` on startup.
-- Loads one local CSV/JSON file or a folder selection of CSV/JSON files (multi-select upload).
-- Analyzes uploaded CSV/folder data first and treats uploaded data as the primary source for real analysis.
-- Scans uploaded symbols for FRD/FGD candidate Day 3 dates before normal replay/analysis.
-- Shows detected candidate dates explicitly in the UI.
-- Supports practice mode (screened-passed dates only) so date selection focuses on scanned FRD/FGD candidates.
-- Supports Auto Reply (automatic entry/exit logic + cumulative PnL).
-- Supports Manual Reply (manual entry/exit + cumulative PnL).
-- Supports timeframes: `1m / 5m / 15m / 1h / 4h / 1D`.
-- Rebuilds higher timeframes from 1m bars.
-- Uses `America/New_York` session logic for strategy timing.
-- Runs a layered internal pipeline: CSV parsing → timeframe rebuild → FRD/FGD screening → day-state classification → replay checkpoint generation → Auto/Manual state prep → final result packaging.
-- In Normal mode, UI emphasizes final screened results and hides raw intermediate internals by default.
-- In Debug/Developer mode, UI and logs expose intermediate traces, rejected dates, and rule states.
-- Renders a candlestick chart with required overlays and right-side explain panel with rule-traceable reasoning.
+- Browser entry HTML: `index.html`
+- Active TypeScript entry: `src/main.tsx`
+- Root React component: `src/App.tsx`
+- Build tool / dev server: Vite via `package.json` scripts
+
+> Legacy files such as `src/main.ts` and `src/app.ts` are not wired into `index.html` and are not the current browser entry path.
 
 ---
-
 
 ## Confirmed features
 
+- React + `src/main.tsx` is the only application entrypoint and local startup path.
 - Daily template evaluation for FGD / FRD with rule-traceable pass/fail output.
-- Intraday evaluation now exposes: stop hunt, 123 node 1/2/3 + breakout, move30, quarter-hour rotation tag, and engulfment state.
-- Explain panel shows per-rule pass/fail reasons plus price/time evidence for annotations and review.
+- Intraday evaluation now exposes: source, stop hunt, 123 node 1/2/3, 20EMA confirm, entry/stop, and fixed TP30/35/40/50 annotations with rule-traceable hover evidence.
+- Explain panel shows template classification, bias, stage, missing conditions, can-enter / cannot-enter reasons, and per-rule pass/fail evidence.
 - Pip-aware scoring now converts prices by symbol/decimals, blocks entries when stop distance exceeds 20 pips, and grades fixed TP30/35/40/50 targets with missing-condition feedback.
 - Local sample mode, local CSV/JSON upload, and acceptance-checklist-oriented workflow remain supported.
 
@@ -42,245 +32,44 @@ Local single-page app for Day 3 practice/reply workflow. It loads local OHLCV CS
 npm install
 ```
 
-## Start the app
+---
+
+## Scripts
 
 ```bash
 npm run dev
+npm run check
+npm run build
+npm run preview
 ```
 
-Open `http://127.0.0.1:4173`.
-
-> You can also build and serve static output:
->
-> ```bash
-> npm run build
-> npm run preview
-> ```
+- `npm run dev`: start the local Vite dev server on `http://127.0.0.1:4173`
+- `npm run check`: run TypeScript type-checking with `tsc -p tsconfig.app.json --noEmit`
+- `npm run build`: run `npm run check` first, then create deployable static assets in `dist/`
+- `npm run preview`: serve the built `dist/` output locally
 
 ---
 
-## Normal User Guide
+## How to start
 
-### 1) Load a CSV file
-1. Start the app.
-2. Use the file picker at top-left.
-3. Select one `.csv` file.
-4. The symbol is derived from filename (before extension).
+1. Install dependencies with `npm install`.
+2. Start the dev server with `npm run dev`.
+3. Open `http://127.0.0.1:4173`.
 
-### 2) Load a folder of CSV files
-1. Click the same file picker.
-2. Multi-select all files from your folder (or drag-select in OS dialog).
-3. The app parses each file and builds a symbol list from filenames.
+If you want a production build instead:
 
-### 3) Switch symbol
-1. Use the symbol dropdown beside file upload.
-2. Select the symbol you want to inspect.
-3. Candidate date list and chart update for the selected symbol.
-
-### 4) Switch timeframe
-1. Use timeframe dropdown.
-2. Choose one of `1m, 5m, 15m, 1h, 4h, 1D`.
-3. Non-1m views are aggregated from source 1m bars.
-
-### 5) Switch strategy line (FGD / FRD)
-1. Use strategy dropdown (`FGD` or `FRD`).
-2. Explain panel and annotations recompute using selected line.
-
-### 6) Switch Auto Reply / Manual Reply
-1. Use mode dropdown (`Auto Reply` or `Manual Reply`).
-2. For Manual mode, enter manual `entry` and `exit` in the input fields.
-3. Click **Apply trade to PnL** to add that trade’s result to cumulative PnL.
-
-### 7) Use sample mode
-- On first load, app first attempts to auto-load built-in `frd_fgd_three_day_windows.csv`; if unavailable, it falls back to `SAMPLE` data.
-- Uploading your own files replaces active datasets with uploaded data.
-
-### 8) Read detected candidate dates
-- The text line `Detected candidate dates:` lists scanned results as `YYYY-MM-DD(FGD|FRD)`.
-- Practice mode can restrict date dropdown to this filtered set.
-
-### 9) Normal mode vs Debug mode
-- **Normal mode visibility boundary:** focuses on final screened outcomes used for replay/practice/trade decisions.
-- **Normal mode default:** intermediate raw internals (trace logs, rejected candidates, low-level rule transitions) are hidden.
-- **Debug mode visibility boundary:** exposes intermediate traces, rejected dates, and rule-state transitions for diagnosis.
-- Use Debug mode when validating why a date passed/failed screening or why a specific rule gate blocked entry.
-
-### 10) Read the explain panel
-- Explain panel reports template (FGD/FRD), bias, stage, missing conditions, target tier, and trade/PnL summary.
-- Missing conditions are explicit rule checkpoints (for example `20EMA confirm missing`, `stop hunt missing`, `123 missing`, `skip: stop too large`).
-
-### 11) Read chart annotations
-Chart includes:
-- candlesticks
-- 20EMA
-- previous close
-- HOS / LOS
-- HOD / LOD
-- source
-- entry
-- stop
-- TP30 / TP35 / TP40 / TP50
-
-### 12) How cumulative PnL works
-- Each click of **Apply trade to PnL** adds current trade `pnlPips` to running total.
-- Auto mode uses computed trade from strategy engine.
-- Manual mode uses user-provided entry/exit and selected line direction.
-
-
-### 13) Replay Mode (TradingView-like)
-Replay behavior is defined to feel close to TradingView Replay while preserving rule-traceable Day 3 logic:
-
-1. **Replay start point (context first)**
-   - Selected FRD/FGD replay starts from the **previous day** (D-1 context), not only near entry.
-   - FRD replay exposes Pump Day / pre-FRD context first.
-   - FGD replay exposes Dump Day / pre-FGD context first.
-2. **Candlestick rendering style**
-   - Chart uses real OHLC candles.
-   - Candle body thickness remains visually uniform and stable as replay advances.
-   - Candle spacing stays consistent for readability.
-   - X-axis always shows clear date/time labels.
-   - X-axis labels adapt to active timeframe (`1m / 5m / 15m / 1h / 4h / 1D`).
-   - Current replay bar time is visibly highlighted during replay.
-   - Multi-day replay keeps day boundaries visually understandable.
-3. **TradingView-like interaction on chart**
-   - Mouse-wheel zoom in/out is supported directly on the chart.
-   - Zoom is cursor-centered and smooth, while preserving candle readability.
-   - Drag/pan left-right is supported to inspect history.
-   - Panning preserves uniform candle width/spacing.
-   - In replay, panning/zooming never reveals future candles.
-4. **Replay progression behavior**
-   - Replay advances bar-by-bar.
-   - User can pause at any step.
-   - Step forward/backward by one bar is supported.
-   - Replay can auto-stop at important checkpoints.
-5. **Replay controls**
-   - `Play`
-   - `Pause`
-   - `Step +1`
-   - `Step -1`
-   - `Jump prev checkpoint`
-   - `Jump next checkpoint`
-   - `Jump D-2 start`
-   - `Jump D-1 start`
-   - `Jump Day 3 start`
-   - Replay speed selector
-   - Toggle auto-stop checkpoints on/off
-6. **Partial-history integrity**
-   - During replay, labels/states/explanations/annotations/trade decisions/target grading must be computed only from currently revealed bars.
-   - Future candles must not influence current interpretation.
-   - Auto Reply and Manual Reply decisions must use only currently revealed bars.
-   - Explain panel and annotations update only from currently revealed bars.
-7. **Explain + chart state visibility**
-   - When replay pauses or auto-stops, chart shows an explicit on-chart state banner.
-   - Explain panel updates live with current day type, confirmed rules, missing rules, and FRD/FGD readiness.
-
-### 14) Replay checkpoint states
-Replay auto-pause checkpoints and chart labels are a core behavior (not optional decoration) and must include at least:
-
-- Pump Day complete
-- Dump Day complete
-- Possible FRD tomorrow
-- Possible FGD tomorrow
-- FRD signal day detected
-- FGD signal day detected
-- D-1 body >= 40 pips
-- D-1 body >= 60% of full-day range
-- Inside day detected
-- Day 3 begins
-- New York session begins
-- Source detected
-- Stop hunt detected
-- 123 in progress
-- 123 confirmed
-- 20EMA confirm detected
-- Entry qualified
-- Skip: stop too large
-- Target tier = 30
-- Target tier = 35
-- Target tier = 40
-- Target tier = 50
-- Trade entered
-- Trade exited
-
-At each auto-pause checkpoint, the chart must show an on-chart interpretation label/banner such as:
-- `Pump Day complete`
-- `Tomorrow may be FRD`
-- `FRD signal day detected`
-- `D-1 body = 63% of range`
-- `Day 3 started`
-- `Source detected`
-- `Stop hunt confirmed`
-- `123 confirmed`
-- `20EMA confirm detected`
-- `Entry qualified`
-- `Skip: stop too large`
-- `Target grade upgraded to 35`
-
-### 15) Replay commentary + day narrative
-- Replay acts like a live analyst from revealed bars only:
-  - what just happened
-  - current state
-  - what tomorrow might be
-  - what is still missing
-  - whether FRD/FGD conditions are forming
-  - whether entry is allowed yet
-  - whether setup improved or weakened
-- Explain/chart narrative must clearly show sequence:
-  - previous context day
-  - Pump Day or Dump Day
-  - FRD or FGD signal day
-  - Day 3 trading day
-
+1. Run `npm run build`.
+2. Run `npm run preview`.
+3. Open the preview URL shown by Vite.
 
 ---
 
-## Rule Explanation
+## UI workflow
 
-### Day 2
-- Previous trading day used as context candle in Day 3 setup sequence.
+### 1) Load data
 
-### Day 3
-- Current target day for execution/evaluation after Day 1 + Day 2 context.
-
-### FGD
-- In this implementation, candidate scan checks a Day-2 dump then Day-1 bullish recovery profile before tagging Day 3 as `FGD` candidate.
-
-### FRD
-- In this implementation, candidate scan checks a Day-2 pump then Day-1 bearish inside profile before tagging Day 3 as `FRD` candidate.
-
-### Source
-- Source is LOS for FGD and HOS for FRD in explain/annotation logic.
-
-### HOS / LOS
-- HOS = high of session reference.
-- LOS = low of session reference.
-- Used for contextual structure and source interpretation.
-
-### HOD / LOD
-- HOD = high of day.
-- LOD = low of day.
-- Displayed as contextual chart references.
-
-### Stop hunt
-- Sweep/reclaim (FGD) or sweep/reject (FRD) behavior in session bars, used for qualification and target upgrades.
-
-### 123
-- Three-point pattern check around source window used as structural confirmation.
-
-### 20EMA confirm
-- Checks whether price closes back over (FGD) or under (FRD) EMA(20).
-
-### move30
-- Measures short-window move in pips from source after source bar index.
-
-### Target grading 30 / 35 / 40 / 50
-- Target tier escalates by rule checks (EMA confirm, move thresholds, stop hunt/engulf, 123).
-- Tiers drive TP30/35/40/50 plotting and Auto Reply target choice.
-
-### `skip: stop too large`
-- Entry is blocked if stop distance is above configured threshold; explain panel shows this explicit reason.
-
----
+- On first load, the app tries to load built-in sample data automatically.
+- To replace it, use the file input in the top control row and choose one or more `.csv` / `.json` files.
 
 ## Debug Guide (Development)
 
@@ -326,7 +115,7 @@ Uploaded CSV/folder data runs through this pipeline first and is treated as the 
 - Strategy engine logic: `src/strategy/engine.ts`
 - Annotation construction: `src/strategy/engine.ts` (returned `annotations`)
 - UI composition/state: `src/App.tsx`
-- Chart rendering: `src/ui/ChartPanel.tsx` and `src/ui/render.ts`
+- Chart rendering: `src/ui/ChartPanel.tsx`
 - Explain panel rendering: `src/ui/ExplainPanel.tsx`
 
 ### Inspect computed FRD / FGD candidate dates
@@ -399,115 +188,77 @@ When state transitions look wrong:
 4. Wrong timeframe shape:
    - Validate bucket keys in `key(...)` and grouped output in `aggregate(...)`.
 
----
+- Use the symbol dropdown immediately to the right of the file input.
+- The dropdown options come from the current dataset list.
+- When you change symbol, the screened table, day selector, chart, and explain panel update together.
 
-## Troubleshooting
+### 3) Switch timeframe
 
-### CSV loads but chart is empty
-- Confirm timestamps are valid and in ascending order.
-- Confirm required headers exactly match parser expectations.
-- Check browser console for parse errors.
+- Use the timeframe dropdown in the top control row.
+- Available values are `1m`, `5m`, `15m`, `1h`, `4h`, and `1D`.
+- Higher timeframes are aggregated from 1-minute source bars.
 
-### Wrong timezone display
-- Ensure input timestamps are timezone-aware.
-- Verify your expectation against `America/New_York` strategy window behavior.
+### 4) Filter candidate dates
 
-### No FRD / FGD dates found
-- Confirm data has enough daily bars (at least 3 days).
-- Review candidate conditions in strategy engine and compare with your data profile.
+- Use `FGD on` and `FRD on` to include or exclude each line type.
+- Use `Practice mode (filtered dates only)` to keep the date dropdown limited to screened candidate dates.
+- Use the date dropdown to pick the current trading day under review.
 
-### Annotations not appearing
-- Confirm a valid day is selected and day bars are present.
-- Check if strategy line/date combination yields computable annotation anchors.
+### 5) Switch reply mode
 
-### Auto Reply did not take a trade
-- Entry is only created when `entryAllowed` is true.
-- Check explain panel missing list, especially `skip: stop too large`.
+- Use the `Auto Reply` / `Manual Reply` dropdown.
+- In `Manual Reply`, the `entry` and `exit` inputs appear next to the mode selector.
+- Click **Apply trade to PnL** to add the current trade result to total PnL.
 
-### Manual Reply PnL looks wrong
-- Confirm numeric entry/exit values.
-- Confirm selected line direction (FGD long, FRD short) when interpreting pip sign.
+### 6) Read the screened results
 
-### Target lines look wrong
-- Confirm selected strategy line and entry anchor.
-- Verify TP offsets are fixed pip tiers (30/35/40/50).
+- The **Screened Results (Final)** table lists:
+  - `Symbol`
+  - `Candidate Date`
+  - `Line Type`
+  - `Validity`
+  - `Replay Availability`
+  - `Recommended Next Action`
+  - `Current Target Tier`
 
-### Stop is larger than expected
-- Check source bar selection and strategy line.
-- Verify entry-stop pip distance in explain panel and `entryAllowed` rule.
+### 7) Open the debug panel
 
-### Timeframe aggregation looks wrong
-- Compare 1m source sequence with grouped timeframe output.
-- Inspect UTC bucket boundaries used by aggregation logic.
+- Enable the `Debug panel` checkbox in the top control row.
+- This shows the **Debug Panel (Intermediate Artifacts)** section with raw scan traces and debug payload output for passed rows.
 
-### Replay paused at the wrong timing
-- Verify the checkpoint event order and bar index produced by replay checkpoint generation.
-- Compare active replay pointer (revealed bar count) against the expected checkpoint bar.
-- Confirm timeframe alignment so checkpoint evaluation is based on the currently selected view built from 1m.
+### 8) Read the explain panel
 
-### Replay checkpoint label is wrong
-- Confirm the checkpoint type emitted by the strategy/replay pipeline and ensure the label mapping matches it exactly.
-- Validate that the explain panel and on-chart banner are both fed by the same checkpoint payload.
-- Ensure no future bar data is being read when constructing pause labels.
+- The right-side **Explain Panel** shows:
+  - `Template`
+  - `Bias`
+  - `Current Stage`
+  - `Entry status`
+  - `Recommended target`
+  - `Why classification / stage`
+  - `判斷依據明細`
+  - `Intraday rule summary`
+  - `Target tiers`
+  - `Missing conditions`
+  - `Rule Trace`
+  - `PnL`
 
+### 9) Read the chart
 
----
+The current chart component renders:
 
-## Developer Notes
-
-### PDF-derived rules vs user-confirmed extension rules
-- Core rule implementation should remain traceable to existing strategy logic and explicit user confirmations.
-- Documentation/extensions in this README are user-confirmed requirements for explanation/debug clarity.
-- If a rule is ambiguous, preserve existing behavior and annotate clearly in code comments (per project constraints).
-
-### Current Runtime Entry
-- Runtime track: **TypeScript + React (Vite)**.
-- HTML entrypoint: `index.html` mounting `<div id="root"></div>`.
-- Application bootstrap: `src/main.tsx` (renders `src/App.tsx`).
-- Legacy plain-JS runtime entry (`src/app.js` + related JS modules) has been removed to avoid dual-track drift.
-
-### Confirmed Features
-Only explicitly confirmed features are listed below:
-1. Load local CSV / JSON OHLCV
-2. Load a folder of symbol files
-3. Include built-in symbols/datasets for immediate use (default: `frd_fgd_three_day_windows.csv`)
-4. After upload, analyze and screen FRD / FGD candidate dates first
-5. Show detected final candidate dates explicitly
-6. In practice mode, only show filtered dates
-7. Auto Reply = automatic entry / exit + cumulative PnL
-8. Manual Reply = manual entry / exit + cumulative PnL
-9. Support 1m / 5m / 15m / 1h / 4h / 1D
-10. Rebuild higher timeframes from 1m
-11. Use America/New_York timezone
-12. Main chart must be a real candlestick chart
-13. Candles must have uniform TradingView-like thickness and spacing
-14. Chart must clearly display date/time on the x-axis
-15. Chart must support mouse-wheel zoom like TradingView
-16. Chart must support drag/pan like TradingView
-17. Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50
-18. Right-side explain panel with rule-based reasoning
-19. Add expanded explanation documentation
-20. Add debug-friendly README
-21. Replay Mode similar to TradingView Replay
-22. Replay starts from the day before the selected FRD/FGD date
-23. Replay can auto-stop at important market/strategy states
-24. Replay must auto-pause at key moments and show on-chart state labels
-25. Frontend should display only final screened results by default
-26. README
-27. Sample mode
-28. Auto-generated acceptance checklist
-
-### Not Yet Confirmed / Not Included
-- Any broker API integration.
-- Any remote/cloud data source requirement.
-- Any feature not explicitly confirmed in the project requirements.
+- close line
+- `20EMA`
+- `previous close`
+- `HOS`
+- `LOS`
+- `HOD`
+- `LOD`
+- annotation markers for detected events
 
 ---
 
-## Acceptance Checklist Generator
+## Notes on current implementation scope
 
-```bash
-node scripts/generate-checklist.mjs
-```
-
-Generates/updates `ACCEPTANCE_CHECKLIST.md` from current confirmed feature scope.
+- The shipped UI is the React entry described above.
+- This README intentionally does **not** claim replay controls, TradingView-style bar stepping, or candlestick rendering because those behaviors are not currently wired into the active UI.
+- Use the confirmed-features list above as the source of truth for what is actually implemented right now.

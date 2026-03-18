@@ -43,7 +43,7 @@ const toPips = (priceDiff: number, pipPrecision: number): number =>
 const addAnnotation = (
   annotations: InternalAnnotation[],
   id: string,
-  kind: string,
+  kind: InternalAnnotation["kind"],
   point: IntradayPivotPoint | undefined,
   ruleName: string,
   reasoning: string,
@@ -54,6 +54,7 @@ const addAnnotation = (
     kind,
     barTime: point.barTime,
     price: point.price,
+    ruleId: ruleName,
     ruleName,
     reasoning,
   });
@@ -492,45 +493,36 @@ export const evaluateIntradayPatterns = (params: {
   );
   addAnnotation(
     annotations,
-    "stop",
-    "stop",
+    "stopHunt",
+    "stopHunt",
     stopHuntResult.stopHunt?.sweptLevel,
     "stop-hunt",
     stopHuntResult.trace.detail,
   );
   addAnnotation(
     annotations,
-    "node1",
-    "node1",
+    "point1",
+    "point1",
     patternResult.pattern123?.node1,
     "123-node1",
     "123 node 1",
   );
   addAnnotation(
     annotations,
-    "node2",
-    "node2",
+    "point2",
+    "point2",
     patternResult.pattern123?.node2,
     "123-node2",
     "123 node 2",
   );
   addAnnotation(
     annotations,
-    "node3",
-    "node3",
+    "point3",
+    "point3",
     patternResult.pattern123?.node3,
     "123-node3",
     "123 node 3",
   );
-  addAnnotation(
-    annotations,
-    "breakout",
-    "breakout",
-    patternResult.pattern123?.breakout,
-    "123-breakout",
-    patternResult.trace.detail,
-  );
-
   return {
     source,
     stop: stopHuntResult.stopHunt?.sweptLevel,
