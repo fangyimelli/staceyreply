@@ -1,15 +1,13 @@
 import type { OhlcvBar, Timeframe } from '../types/domain';
+import { timeframeBucketKeyNy } from '../utils/nyDate';
 
-const key = (t: string, tf: Timeframe): string => {
-  const d = new Date(t);
-  if (tf === '1D') return d.toISOString().slice(0, 10);
-  const map: Record<Exclude<Timeframe, '1m'|'1D'>, number> = { '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
-  const m = map[tf as keyof typeof map];
-  const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
-  const b = Math.floor(mins / m) * m;
-  const hh = String(Math.floor(b / 60)).padStart(2, '0');
-  const mm = String(b % 60).padStart(2, '0');
-  return `${d.toISOString().slice(0, 10)}T${hh}:${mm}`;
+const key = (time: string, timeframe: Timeframe): string => {
+  if (timeframe === '1m') return time;
+  if (timeframe === '1D' || timeframe === '5m' || timeframe === '15m' || timeframe === '1h' || timeframe === '4h') {
+    return timeframeBucketKeyNy(time, timeframe);
+  }
+
+  return time;
 };
 
 export const aggregate = (bars: OhlcvBar[], tf: Timeframe): OhlcvBar[] => {
