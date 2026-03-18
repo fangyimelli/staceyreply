@@ -1,5 +1,6 @@
 import { aggregateFrom1m, ema } from '../aggregation/timeframe';
 import { buildStrategyPreprocessingContext, detectCandidates, evaluateDay } from './engine';
+import { dailyBucketKeyNy } from '../utils/nyDate';
 import type {
   OhlcvBar,
   ReplyMode,
@@ -36,7 +37,7 @@ export const buildStaticSymbolAnalysis = (
 
 const toDayChoices = (bars: OhlcvBar[], importedDates: string[], timeframe: Timeframe, practiceOnly: boolean, screenedDates: string[]): string[] => {
   const aggregatedBars = bars.length > 0 ? aggregateFrom1m(bars, timeframe) : [];
-  const allDayChoices = [...new Set(aggregatedBars.map((bar) => bar.time.slice(0, 10)))];
+  const allDayChoices = [...new Set(aggregatedBars.map((bar) => dailyBucketKeyNy(bar.time)))];
 
   return practiceOnly
     ? screenedDates.length
@@ -58,7 +59,7 @@ export const resolveSelectedDay = (params: {
   const { dataset, importedDates, timeframe, practiceOnly, screenedDates, requestedDate } = params;
   const bars = dataset?.bars1m ?? [];
   const dayChoices = toDayChoices(bars, importedDates, timeframe, practiceOnly, screenedDates);
-  const selectedDay = requestedDate || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10) || importedDates[0] || '';
+  const selectedDay = requestedDate || dayChoices[0] || (bars.length > 0 ? dailyBucketKeyNy(bars[bars.length - 1].time) : '') || importedDates[0] || '';
 
   return { dayChoices, selectedDay };
 };

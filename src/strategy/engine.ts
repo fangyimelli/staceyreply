@@ -1,5 +1,6 @@
 import { Candle, StrategyMarker, StrategyResult } from "../types";
 import { evaluateIntradayPatterns } from "./intraday";
+import { dailyBucketKeyNy } from "../utils/nyDate";
 import type {
   CandidateDate,
   InternalDayAnalysis,
@@ -106,9 +107,6 @@ const priceDiffToPips = (priceDiff: number, pipConfig: PipConfig): number =>
 
 const pipsToPrice = (pips: number, pipConfig: PipConfig): number =>
   pips * pipConfig.pipSize;
-
-const dailyBucketKeyNy = (time: string): string =>
-  new Date(time).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
 const formatLabel = (ruleId: string): string =>
   ruleId
