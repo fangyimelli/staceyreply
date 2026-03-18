@@ -1,14 +1,29 @@
-export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
-export type StrategyLine = 'FGD' | 'FRD';
-export type ReplyMode = 'auto' | 'manual';
-export interface OhlcvBar { time: string; open: number; high: number; low: number; close: number; volume: number; }
-export interface CandidateDate { symbol: string; date: string; type: StrategyLine; reason: string; }
-export interface SymbolDataset { symbol: string; bars1m: OhlcvBar[]; }
+export type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1D";
+export type StrategyLine = "FGD" | "FRD";
+export type ReplyMode = "auto" | "manual";
+export interface OhlcvBar {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+export interface CandidateDate {
+  symbol: string;
+  date: string;
+  type: StrategyLine;
+  reason: string;
+}
+export interface SymbolDataset {
+  symbol: string;
+  bars1m: OhlcvBar[];
+}
 
 // Internal analysis structures (strategy / replay pipeline).
 export interface InternalExplainState {
-  template: 'FGD' | 'FRD' | 'NONE';
-  bias: 'LONG' | 'SHORT' | 'NEUTRAL';
+  template: "FGD" | "FRD" | "NONE";
+  bias: "LONG" | "SHORT" | "NEUTRAL";
   stage: string;
   missingConditions: string[];
   reasons: string[];
@@ -16,6 +31,7 @@ export interface InternalExplainState {
   entryAllowed: boolean;
   targetTier: 30 | 35 | 40 | 50 | null;
   ruleTrace: RuleTraceItem[];
+  intraday?: IntradayRuleSummary;
 }
 
 export interface RuleTraceItem {
@@ -24,6 +40,29 @@ export interface RuleTraceItem {
   detail: string;
   prices: Record<string, number>;
   times: Record<string, string>;
+}
+
+export interface IntradayPivotPoint {
+  barTime: string;
+  price: number;
+}
+
+export interface IntradayRuleSummary {
+  source?: IntradayPivotPoint;
+  stop?: IntradayPivotPoint;
+  stopHunt?: {
+    sweptLevel: IntradayPivotPoint;
+    reclaim: IntradayPivotPoint;
+  };
+  pattern123?: {
+    node1?: IntradayPivotPoint;
+    node2?: IntradayPivotPoint;
+    node3?: IntradayPivotPoint;
+    breakout?: IntradayPivotPoint;
+  };
+  move30Pips: number;
+  rotationTagged: boolean;
+  engulfment: boolean;
 }
 
 export interface InternalAnnotation {
@@ -36,7 +75,7 @@ export interface InternalAnnotation {
 }
 
 export interface InternalTrade {
-  side: 'LONG' | 'SHORT';
+  side: "LONG" | "SHORT";
   entry: number;
   exit: number;
   pnlPips: number;
@@ -65,7 +104,7 @@ export interface ScreenedResultRow {
   symbol: string;
   candidateDate: string;
   lineType: StrategyLine;
-  validity: 'pass' | 'fail';
+  validity: "pass" | "fail";
   replayAvailable: boolean;
   recommendedNextAction: string;
   currentTargetTier: 30 | 35 | 40 | 50 | null;

@@ -25,6 +25,16 @@ Local single-page app for Day 3 practice/reply workflow. It loads local OHLCV CS
 
 ---
 
+
+## Confirmed features
+
+- Daily template evaluation for FGD / FRD with rule-traceable pass/fail output.
+- Intraday evaluation now exposes: stop hunt, 123 node 1/2/3 + breakout, move30, quarter-hour rotation tag, and engulfment state.
+- Explain panel shows per-rule pass/fail reasons plus price/time evidence for annotations and review.
+- Local sample mode, local CSV/JSON upload, and acceptance-checklist-oriented workflow remain supported.
+
+---
+
 ## Install dependencies
 
 ```bash
