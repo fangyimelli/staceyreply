@@ -21,8 +21,91 @@ function ema(values: number[], period: number): number[] {
   return out;
 }
 
-const toPips = (priceDiff: number, pipPrecision: number): number =>
-  priceDiff * Math.pow(10, pipPrecision);
+interface PipConfig {
+  symbol: string;
+  pipSize: number;
+  pipDecimals: number;
+  priceDecimals: number;
+  basis: string;
+}
+
+type TargetTier = 30 | 35 | 40 | 50;
+
+interface TierAssessment {
+  tier: TargetTier;
+  reached: boolean;
+  missing: string[];
+  description: string;
+}
+
+
+const countDecimals = (value: number): number => {
+  const normalized = value.toString().toLowerCase();
+  if (normalized.includes("e-")) {
+    const [base, exponent] = normalized.split("e-");
+    return (base.split(".")[1]?.length ?? 0) + Number(exponent);
+  }
+  return normalized.split(".")[1]?.length ?? 0;
+};
+
+const inferPipConfig = (symbol: string | undefined, bars: OhlcvBar[]): PipConfig => {
+  const normalizedSymbol = symbol?.toUpperCase() ?? "UNKNOWN";
+  const priceDecimals = bars.reduce(
+    (max, bar) =>
+      Math.max(
+        max,
+        countDecimals(bar.open),
+        countDecimals(bar.high),
+        countDecimals(bar.low),
+        countDecimals(bar.close),
+      ),
+    0,
+  );
+
+  if (/(JPY)/.test(normalizedSymbol)) {
+    return {
+      symbol: normalizedSymbol,
+      pipSize: 0.01,
+      pipDecimals: 2,
+      priceDecimals,
+      basis: "JPY pair rule",
+    };
+  }
+
+  if (/^(XAU|XAG)/.test(normalizedSymbol)) {
+    return {
+      symbol: normalizedSymbol,
+      pipSize: 0.1,
+      pipDecimals: 1,
+      priceDecimals,
+      basis: "metal rule",
+    };
+  }
+
+  if (priceDecimals <= 2) {
+    return {
+      symbol: normalizedSymbol,
+      pipSize: 0.01,
+      pipDecimals: 2,
+      priceDecimals,
+      basis: "2-decimal price rule",
+    };
+  }
+
+  return {
+    symbol: normalizedSymbol,
+    pipSize: 0.0001,
+    pipDecimals: 4,
+    priceDecimals,
+    basis: "default FX rule",
+  };
+};
+
+const priceDiffToPips = (priceDiff: number, pipConfig: PipConfig): number =>
+  priceDiff / pipConfig.pipSize;
+
+const pipsToPrice = (pips: number, pipConfig: PipConfig): number =>
+  pips * pipConfig.pipSize;
 
 const dailyBucketKeyNy = (time: string): string =>
   new Date(time).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -52,7 +135,8 @@ export function evaluateDailyTemplate(params: {
   line: StrategyLine;
   bars1m: OhlcvBar[];
   selectedDay: string;
-  pipPrecision: number;
+  pipPrecision?: number;
+  symbol?: string;
 }): {
   template: "FGD" | "FRD" | "NONE";
   entryAllowed: boolean;
@@ -61,7 +145,7 @@ export function evaluateDailyTemplate(params: {
   evidenceDetails: string[];
   ruleTrace: RuleTraceItem[];
 } {
-  const { line, bars1m, selectedDay, pipPrecision } = params;
+  const { line, bars1m, selectedDay, symbol } = params;
   const dailyBars = aggregateDailyNy(bars1m);
   const idxD0 = dailyBars.findIndex(
     (bar) => dailyBucketKeyNy(bar.time) === selectedDay,
@@ -89,6 +173,7 @@ export function evaluateDailyTemplate(params: {
     };
   }
 
+  const pipConfig = inferPipConfig(symbol, bars1m);
   const d2 = dailyBars[idxD0 - 2];
   const d1 = dailyBars[idxD0 - 1];
   const d0 = dailyBars[idxD0];
@@ -99,8 +184,10 @@ export function evaluateDailyTemplate(params: {
   const d1Bear = d1.close < d1.open;
   const d1InsideD2 = d1.high <= d2.high && d1.low >= d2.low;
 
-  const d1BodyPips = Math.abs(toPips(d1.close - d1.open, pipPrecision));
-  const d1RangePips = Math.abs(toPips(d1.high - d1.low, pipPrecision));
+  const d1BodyPips = Math.abs(
+    priceDiffToPips(d1.close - d1.open, pipConfig),
+  );
+  const d1RangePips = Math.abs(priceDiffToPips(d1.high - d1.low, pipConfig));
   const d1BodyRangeRatio = d1RangePips === 0 ? 0 : d1BodyPips / d1RangePips;
   const d1BodyPriorityPass = d1BodyPips >= 40 && d1BodyRangeRatio >= 0.6;
 
@@ -111,6 +198,17 @@ export function evaluateDailyTemplate(params: {
       detail: "D-2, D-1 and D0 are present.",
       prices: {},
       times: { d2: d2.time, d1: d1.time, d0: d0.time },
+    },
+    {
+      ruleId: "pip-conversion",
+      passed: true,
+      detail: `Pip conversion inferred from ${pipConfig.basis}.`,
+      prices: {
+        pipSize: pipConfig.pipSize,
+        pipDecimals: pipConfig.pipDecimals,
+        priceDecimals: pipConfig.priceDecimals,
+      },
+      times: {},
     },
     {
       ruleId: "fgd-d2-dump",
@@ -167,6 +265,7 @@ export function evaluateDailyTemplate(params: {
 
   const reasons: string[] = [];
   const evidenceDetails = [
+    `pip conversion: symbol=${pipConfig.symbol}, basis=${pipConfig.basis}, pipSize=${pipConfig.pipSize}, priceDecimals=${pipConfig.priceDecimals}`,
     `D-2(${dailyBucketKeyNy(d2.time)}): O=${d2.open}, H=${d2.high}, L=${d2.low}, C=${d2.close}`,
     `D-1(${dailyBucketKeyNy(d1.time)}): O=${d1.open}, H=${d1.high}, L=${d1.low}, C=${d1.close}, body=${d1BodyPips.toFixed(1)} pips, range=${d1RangePips.toFixed(1)} pips, body/range=${(d1BodyRangeRatio * 100).toFixed(1)}%`,
     `D0(${dailyBucketKeyNy(d0.time)}): O=${d0.open}, H=${d0.high}, L=${d0.low}, C=${d0.close}`,
@@ -186,21 +285,18 @@ export function evaluateDailyTemplate(params: {
       missingConditions.push(
         "FGD missing D-1 bullish close (D-1 close > D-1 open).",
       );
-    if (d1BodyPriorityPass) {
+    if (d1BodyPriorityPass)
       reasons.push(
-        "FGD priority condition passed: D-1 body >=40 pips and body/range >=60%.",
+        "FGD priority body check passed: D-1 body >= 40 pips and >= 60% of range.",
       );
-    } else {
-      reasons.push(
-        "FGD priority condition not met: continue with core-condition result only.",
+    else
+      missingConditions.push(
+        "FGD priority body check not met (need D-1 body >=40 pips and >=60% of range).",
       );
-    }
-  }
-
-  if (line === "FRD") {
+  } else {
     if (frdPass)
       reasons.push(
-        "FRD core conditions passed: D-2 pump, D-1 bearish close, and inside day.",
+        "FRD core conditions passed: D-2 pump, D-1 bearish close, and D-1 inside day.",
       );
     if (!d2Pump)
       missingConditions.push(
@@ -212,7 +308,7 @@ export function evaluateDailyTemplate(params: {
       );
     if (!d1InsideD2)
       missingConditions.push(
-        "FRD missing inside day (D-1 high<=D-2 high and D-1 low>=D-2 low).",
+        "FRD missing inside day (D-1 high <= D-2 high and D-1 low >= D-2 low).",
       );
   }
 
@@ -226,6 +322,108 @@ export function evaluateDailyTemplate(params: {
   };
 }
 
+const buildFixedTargets = (
+  line: StrategyLine,
+  entry: number,
+  pipConfig: PipConfig,
+): Record<TargetTier, number> => ({
+  30: line === "FGD" ? entry + pipsToPrice(30, pipConfig) : entry - pipsToPrice(30, pipConfig),
+  35: line === "FGD" ? entry + pipsToPrice(35, pipConfig) : entry - pipsToPrice(35, pipConfig),
+  40: line === "FGD" ? entry + pipsToPrice(40, pipConfig) : entry - pipsToPrice(40, pipConfig),
+  50: line === "FGD" ? entry + pipsToPrice(50, pipConfig) : entry - pipsToPrice(50, pipConfig),
+});
+
+const scoreTargetTiers = (params: {
+  line: StrategyLine;
+  dailyTemplateAllowed: boolean;
+  intraday: ReturnType<typeof evaluateIntradayPatterns>;
+  stopDistancePips: number;
+}): {
+  entryAllowed: boolean;
+  currentTier: TargetTier | null;
+  assessments: TierAssessment[];
+  reasons: string[];
+  missingConditions: string[];
+} => {
+  const { line, dailyTemplateAllowed, intraday, stopDistancePips } = params;
+  const coreRequirements = dailyTemplateAllowed
+    ? []
+    : [line === "FGD" ? "FGD daily template not complete" : "FRD daily template not complete"];
+  const stopGateMissing = stopDistancePips > 20 ? ["skip: stop too large"] : [];
+
+  const assessments: TierAssessment[] = [
+    {
+      tier: 30,
+      reached:
+        coreRequirements.length === 0 &&
+        stopGateMissing.length === 0 &&
+        Boolean(intraday.stopHunt) &&
+        Boolean(intraday.pattern123?.breakout),
+      missing: [
+        ...coreRequirements,
+        ...stopGateMissing,
+        ...(intraday.stopHunt ? [] : ["30 missing stop hunt"]),
+        ...(intraday.pattern123?.breakout ? [] : ["30 missing 123 breakout"]),
+      ],
+      description: "30 requires daily template + stop hunt + 123 breakout + stop <= 20 pips.",
+    },
+    {
+      tier: 35,
+      reached: false,
+      missing: [],
+      description: "35 requires 30 plus measured 30-pip expansion.",
+    },
+    {
+      tier: 40,
+      reached: false,
+      missing: [],
+      description: "40 requires 35 plus quarter-hour rotation confirmation.",
+    },
+    {
+      tier: 50,
+      reached: false,
+      missing: [],
+      description: "50 requires 40 plus engulfment confirmation.",
+    },
+  ];
+
+  assessments[1].reached = assessments[0].reached && intraday.move30Pips >= 30;
+  assessments[1].missing = [
+    ...assessments[0].missing,
+    ...(intraday.move30Pips >= 30 ? [] : ["35 missing measured 30-pip expansion"]),
+  ];
+  assessments[2].reached = assessments[1].reached && intraday.rotationTagged;
+  assessments[2].missing = [
+    ...assessments[1].missing,
+    ...(intraday.rotationTagged ? [] : ["40 missing quarter-hour rotation confirmation"]),
+  ];
+  assessments[3].reached = assessments[2].reached && intraday.engulfment;
+  assessments[3].missing = [
+    ...assessments[2].missing,
+    ...(intraday.engulfment ? [] : ["50 missing engulfment confirmation"]),
+  ];
+
+  const currentTier =
+    [...assessments].reverse().find((assessment) => assessment.reached)?.tier ??
+    null;
+  const nextAssessment = assessments.find((assessment) => !assessment.reached);
+  const reasons = [
+    `Target scorer (${line}) uses fixed pip tiers with entry gate at 30 -> 35 -> 40 -> 50.`,
+    ...assessments
+      .filter((assessment) => assessment.reached)
+      .map((assessment) => `Tier ${assessment.tier} reached: ${assessment.description}`),
+  ];
+  const missingConditions = nextAssessment?.missing ?? [];
+
+  return {
+    entryAllowed: assessments[0].reached,
+    currentTier,
+    assessments,
+    reasons,
+    missingConditions,
+  };
+};
+
 export function runStrategy(candles: Candle[]): StrategyResult {
   const closes = candles.map((c) => c.close);
   const ema20 = ema(closes, 20);
@@ -237,8 +435,16 @@ export function runStrategy(candles: Candle[]): StrategyResult {
   const los = Math.min(first.open, first.close);
   const previousClose = first.close;
   const entry = last.close;
-  const stop = lod;
-  const risk = Math.max(0.01, entry - stop);
+  const priceDecimals = candles.reduce(
+    (max, candle) => Math.max(max, countDecimals(candle.close)),
+    0,
+  );
+  const pipConfig: PipConfig =
+    priceDecimals <= 2
+      ? { symbol: "UNKNOWN", pipSize: 0.01, pipDecimals: 2, priceDecimals, basis: "2-decimal price rule" }
+      : { symbol: "UNKNOWN", pipSize: 0.0001, pipDecimals: 4, priceDecimals, basis: "default FX rule" };
+  const stop = lod - pipConfig.pipSize;
+  const fixedTargets = buildFixedTargets("FGD", entry, pipConfig);
 
   const markers: StrategyMarker[] = [
     {
@@ -261,7 +467,7 @@ export function runStrategy(candles: Candle[]): StrategyResult {
       id: "stop",
       kind: "stop",
       ruleName: "stop",
-      reasoning: "Stop placed below day low.",
+      reasoning: "Stop placed one pip outside source extreme fallback.",
       price: stop,
       time: last.time,
     },
@@ -269,32 +475,32 @@ export function runStrategy(candles: Candle[]): StrategyResult {
       id: "tp30",
       kind: "tp30",
       ruleName: "TP30",
-      reasoning: "30% target tier.",
-      price: entry + risk * 0.3,
+      reasoning: "Fixed 30-pip target tier.",
+      price: fixedTargets[30],
       time: last.time,
     },
     {
       id: "tp35",
       kind: "tp35",
       ruleName: "TP35",
-      reasoning: "35% target tier.",
-      price: entry + risk * 0.35,
+      reasoning: "Fixed 35-pip target tier.",
+      price: fixedTargets[35],
       time: last.time,
     },
     {
       id: "tp40",
       kind: "tp40",
       ruleName: "TP40",
-      reasoning: "40% target tier.",
-      price: entry + risk * 0.4,
+      reasoning: "Fixed 40-pip target tier.",
+      price: fixedTargets[40],
       time: last.time,
     },
     {
       id: "tp50",
       kind: "tp50",
       ruleName: "TP50",
-      reasoning: "50% target tier.",
-      price: entry + risk * 0.5,
+      reasoning: "Fixed 50-pip target tier.",
+      price: fixedTargets[50],
       time: last.time,
     },
   ];
@@ -302,15 +508,15 @@ export function runStrategy(candles: Candle[]): StrategyResult {
   return {
     explain: [
       "FGD / FRD check complete.",
-      "Rule-traceable overlays drawn on chart.",
+      `TP tiers use fixed pip conversion (${pipConfig.basis}, pipSize=${pipConfig.pipSize}).`,
     ],
     stage: "stage-3-check",
     validity: Math.abs(last.close - first.open) > 1 ? "FGD" : "FRD",
     sourceReason: "Selected from first tradable candle.",
-    stopHuntReason: "Stop anchored to LOD for traceability.",
+    stopHuntReason: "Stop anchored one pip outside fallback source extreme.",
     setup123Reason: "1-2-3 structure approximated from day range.",
     entryReason: "Replay entry set at active candle close.",
-    targetTierReason: "TP tiers map to configured risk fractions.",
+    targetTierReason: "TP30/35/40/50 are fixed pip targets, not risk percentages.",
     overlays: { ema20, previousClose, hos, los, hod, lod },
     markers,
   };
@@ -360,6 +566,7 @@ export const evaluateDay = (
   day: string,
   replyMode: ReplyMode,
   manualTrade: { entry: number; exit: number },
+  symbol?: string,
 ): InternalDayAnalysis => {
   const dayBars = bars1m.filter((bar) => dailyBucketKeyNy(bar.time) === day);
   const first = dayBars[0];
@@ -378,6 +585,7 @@ export const evaluateDay = (
         ],
         entryAllowed: false,
         targetTier: null,
+        targetAssessments: [],
         ruleTrace: [
           {
             ruleId: "day-bars-exist",
@@ -392,11 +600,12 @@ export const evaluateDay = (
     };
   }
 
+  const pipConfig = inferPipConfig(symbol, dayBars);
   const dailyTemplate = evaluateDailyTemplate({
     line,
     bars1m,
     selectedDay: day,
-    pipPrecision: 4,
+    symbol,
   });
 
   const previousBars = bars1m.filter((bar) => bar.time < first.time);
@@ -407,41 +616,94 @@ export const evaluateDay = (
   const los = Math.min(...dayBars.map((bar) => bar.open));
 
   const intraday = evaluateIntradayPatterns({ line, dayBars, pipPrecision: 4 });
-  const entryAllowed = dailyTemplate.entryAllowed;
-
+  const sourceBarTime = intraday.source?.barTime;
+  const sourceBar = dayBars.find((bar) => bar.time === sourceBarTime);
+  const sourceExtreme = line === "FGD"
+    ? sourceBar?.low ?? intraday.stopHunt?.sweptLevel.price ?? lod
+    : sourceBar?.high ?? intraday.stopHunt?.sweptLevel.price ?? hod;
   const sourcePrice = intraday.source?.price ?? last.close;
-  const stopPrice = intraday.stop?.price ?? (line === "FGD" ? lod : hod);
+  const stopPrice =
+    line === "FGD"
+      ? sourceExtreme - pipConfig.pipSize
+      : sourceExtreme + pipConfig.pipSize;
   const entry =
     replyMode === "manual" && manualTrade.entry
       ? manualTrade.entry
       : (intraday.pattern123?.breakout?.price ?? sourcePrice);
-  const risk = Math.max(0.0001, Math.abs(entry - stopPrice));
+  const stopDistancePips = Math.abs(priceDiffToPips(entry - stopPrice, pipConfig));
+  const fixedTargets = buildFixedTargets(line, entry, pipConfig);
+  const targetScore = scoreTargetTiers({
+    line,
+    dailyTemplateAllowed: dailyTemplate.entryAllowed,
+    intraday,
+    stopDistancePips,
+  });
+  const defaultExitTier = targetScore.currentTier ?? 30;
   const exit =
     replyMode === "manual" && manualTrade.exit
       ? manualTrade.exit
-      : line === "FGD"
-        ? entry + risk * 0.4
-        : entry - risk * 0.4;
+      : fixedTargets[defaultExitTier];
   const pnlPips =
-    line === "FGD" ? (exit - entry) * 10000 : (entry - exit) * 10000;
+    line === "FGD"
+      ? priceDiffToPips(exit - entry, pipConfig)
+      : priceDiffToPips(entry - exit, pipConfig);
+
+  const targetAssessments = targetScore.assessments.map((assessment) => ({
+    ...assessment,
+    targetPrice: fixedTargets[assessment.tier],
+  }));
 
   return {
     explain: {
       template: dailyTemplate.template,
       bias: line === "FGD" ? "LONG" : "SHORT",
-      stage: "stage-3-check",
+      stage: targetScore.entryAllowed ? "entry-qualified" : "stage-3-check",
       missingConditions: [
         ...dailyTemplate.missingConditions,
         ...intraday.missingConditions,
+        ...targetScore.missingConditions,
       ],
-      reasons: [...dailyTemplate.reasons, ...intraday.reasons],
+      reasons: [
+        ...dailyTemplate.reasons,
+        ...intraday.reasons,
+        ...targetScore.reasons,
+      ],
       evidenceDetails: [
         ...dailyTemplate.evidenceDetails,
         ...intraday.evidenceDetails,
+        `stop placement: sourceExtreme=${sourceExtreme}, stop=${stopPrice}, stopDistance=${stopDistancePips.toFixed(1)} pips`,
+        `fixed targets: TP30=${fixedTargets[30]}, TP35=${fixedTargets[35]}, TP40=${fixedTargets[40]}, TP50=${fixedTargets[50]}`,
       ],
-      entryAllowed,
-      targetTier: entryAllowed ? 40 : null,
-      ruleTrace: [...dailyTemplate.ruleTrace, ...intraday.ruleTrace],
+      entryAllowed: targetScore.entryAllowed,
+      targetTier: targetScore.currentTier,
+      targetAssessments,
+      ruleTrace: [
+        ...dailyTemplate.ruleTrace,
+        ...intraday.ruleTrace,
+        {
+          ruleId: "stop-distance-pips",
+          passed: stopDistancePips <= 20,
+          detail:
+            stopDistancePips <= 20
+              ? "Stop distance is within the 20-pip gate."
+              : "Stop distance exceeds the 20-pip gate; skip entry.",
+          prices: {
+            entry,
+            sourceExtreme,
+            stopPrice,
+            stopDistancePips,
+            pipSize: pipConfig.pipSize,
+          },
+          times: { sourceBarTime: sourceBar?.time ?? last.time },
+        },
+        ...targetAssessments.map((assessment) => ({
+          ruleId: `target-tier-${assessment.tier}`,
+          passed: assessment.reached,
+          detail: `${assessment.description}${assessment.reached ? "" : ` Missing: ${assessment.missing.join(", ")}`}`,
+          prices: { targetPrice: assessment.targetPrice },
+          times: {},
+        })),
+      ],
       intraday: {
         source: intraday.source,
         stop: intraday.stop,
@@ -465,18 +727,42 @@ export const evaluateDay = (
       {
         id: "stop-final",
         kind: "stop",
-        barTime: intraday.stop?.barTime ?? last.time,
+        barTime: sourceBar?.time ?? intraday.stop?.barTime ?? last.time,
         price: stopPrice,
         ruleName: "stop",
-        reasoning: "Stop anchored to stop-hunt evidence or day guardrail",
+        reasoning: `Stop placed one pip outside source extreme (${sourceExtreme})`,
+      },
+      {
+        id: "tp30",
+        kind: "tp30",
+        barTime: last.time,
+        price: fixedTargets[30],
+        ruleName: "TP30",
+        reasoning: "Fixed 30-pip target from entry",
+      },
+      {
+        id: "tp35",
+        kind: "tp35",
+        barTime: last.time,
+        price: fixedTargets[35],
+        ruleName: "TP35",
+        reasoning: "Fixed 35-pip target from entry",
       },
       {
         id: "tp40",
         kind: "tp40",
         barTime: last.time,
-        price: exit,
+        price: fixedTargets[40],
         ruleName: "TP40",
-        reasoning: "Target tier currently set to 40",
+        reasoning: "Fixed 40-pip target from entry",
+      },
+      {
+        id: "tp50",
+        kind: "tp50",
+        barTime: last.time,
+        price: fixedTargets[50],
+        ruleName: "TP50",
+        reasoning: "Fixed 50-pip target from entry",
       },
     ],
     previousClose,
@@ -484,7 +770,7 @@ export const evaluateDay = (
     los,
     hod,
     lod,
-    trade: entryAllowed
+    trade: targetScore.entryAllowed
       ? {
           side: line === "FGD" ? "LONG" : "SHORT",
           entry,

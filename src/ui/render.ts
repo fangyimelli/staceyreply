@@ -21,7 +21,7 @@ export const bindAnnotationTooltip = (canvas: HTMLCanvasElement, bars: OhlcvBar[
 };
 
 export const renderExplain = (el: HTMLElement, explain: ExplainState, pnl: number) => {
-  el.innerHTML = `<h3>Explain Panel</h3><p>classification: ${explain.template}</p><p>current bias: ${explain.bias}</p><p>current stage: ${explain.stage}</p><p>entry allowed: ${explain.entryAllowed}</p><p>recommended target: ${explain.targetTier ?? 'none'} pips</p><h4>why</h4><ul>${explain.reasons.map((r)=>`<li>${r}</li>`).join('')}</ul><h4>missing conditions</h4><ul>${explain.missingConditions.map((m)=>`<li>${m}</li>`).join('')}</ul><p><b>Total PnL:</b> ${pnl.toFixed(1)} pips</p>`;
+  el.innerHTML = `<h3>Explain Panel</h3><p>classification: ${explain.template}</p><p>current bias: ${explain.bias}</p><p>current stage: ${explain.stage}</p><p>entry allowed: ${explain.entryAllowed}</p><p>recommended target: ${explain.targetTier ?? 'none'} pips</p><h4>target tiers</h4><ul>${explain.targetAssessments.map((a)=>`<li>TP${a.tier}: ${a.reached ? 'reached' : 'not yet'} @ ${a.targetPrice.toFixed(5)}${a.missing.length ? ` | missing: ${a.missing.join(', ')}` : ''}</li>`).join('')}</ul><h4>why</h4><ul>${explain.reasons.map((r)=>`<li>${r}</li>`).join('')}</ul><h4>missing conditions</h4><ul>${explain.missingConditions.map((m)=>`<li>${m}</li>`).join('')}</ul><p><b>Total PnL:</b> ${pnl.toFixed(1)} pips</p>`;
 };
 
 
