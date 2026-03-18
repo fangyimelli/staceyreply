@@ -11,15 +11,17 @@ export function ExplainPanel({ explain, trade, totalPnl }: { explain: ExplainSta
       <p><strong>Recommended target:</strong> {explain.targetTier ? `${explain.targetTier} pips` : 'none'}</p>
       <h4>Why classification / stage</h4>
       <ul>{explain.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+      <h4>判斷依據明細</h4>
+      <ul>{explain.evidenceDetails.map((detail) => <li key={detail}>{detail}</li>)}</ul>
       <h4>Missing conditions</h4>
       <ul>{explain.missingConditions.map((m) => <li key={m}>{m}</li>)}</ul>
       <h4>Rule Trace</h4>
       <ul>
-        <li>source rationale: LOS for FGD, HOS for FRD.</li>
-        <li>stop hunt rationale: sweep and reclaim/dropback.</li>
-        <li>123 rationale: sweep, reaction, retest, break trigger.</li>
-        <li>entry rationale: valid only when target grading + stop rule pass.</li>
-        <li>target rationale: 30/35/40/50 graded by move30, stop hunt, 123, 20EMA.</li>
+        {explain.ruleTrace.map((item) => (
+          <li key={item.ruleId}>
+            <strong>{item.ruleId}</strong>: {item.passed ? 'PASS' : 'FAIL'} — {item.detail}
+          </li>
+        ))}
       </ul>
       <h4>PnL</h4>
       {trade ? <p>Last trade {trade.side}: {trade.pnlPips.toFixed(1)} pips ({trade.mode})</p> : <p>No trade executed yet.</p>}

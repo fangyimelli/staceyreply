@@ -13,15 +13,15 @@ export const renderChart = (canvas: HTMLCanvasElement, bars: OhlcvBar[], annotat
   const e=ema20(bars); ctx.strokeStyle='#a855f7'; ctx.beginPath(); e.forEach((v,i)=>{const x=40+i*step+step/2; const yy=y(v); i?ctx.lineTo(x,yy):ctx.moveTo(x,yy);}); ctx.stroke();
   const drawH=(v:number,c:string,l:string)=>{ctx.strokeStyle=c; ctx.beginPath(); ctx.moveTo(30,y(v)); ctx.lineTo(w-5,y(v)); ctx.stroke(); ctx.fillStyle=c; ctx.fillText(l,5,y(v));};
   if(overlays.previousClose!==undefined) drawH(overlays.previousClose,'#6366f1','prev close'); if(overlays.hos!==undefined) drawH(overlays.hos,'#ef4444','HOS'); if(overlays.los!==undefined) drawH(overlays.los,'#10b981','LOS'); if(overlays.hod!==undefined) drawH(overlays.hod,'#f97316','HOD'); if(overlays.lod!==undefined) drawH(overlays.lod,'#0ea5e9','LOD');
-  annotations.forEach((a)=>{ const i=bars.findIndex((b)=>b.time===a.time); const x=40+(i<0?0:i)*step+step/2; const yy=y(a.price); ctx.fillStyle=color[a.kind]??'#111'; ctx.beginPath(); ctx.arc(x,yy,4,0,Math.PI*2); ctx.fill(); });
+  annotations.forEach((a)=>{ const i=bars.findIndex((b)=>b.time===a.barTime); const x=40+(i<0?0:i)*step+step/2; const yy=y(a.price); ctx.fillStyle=color[a.kind]??'#111'; ctx.beginPath(); ctx.arc(x,yy,4,0,Math.PI*2); ctx.fill(); });
 };
 
 export const bindAnnotationTooltip = (canvas: HTMLCanvasElement, bars: OhlcvBar[], annotations: Annotation[], tooltip: HTMLElement) => {
-  canvas.onmousemove=(e)=>{ const r=canvas.getBoundingClientRect(); const x=e.clientX-r.left; const w=canvas.width; const step=(w-60)/Math.max(1,bars.length); const i=Math.max(0,Math.round((x-40-step/2)/step)); const t=bars[Math.min(i,bars.length-1)]?.time; const a=annotations.find((v)=>v.time===t); if(a){ tooltip.textContent=`${a.rule} | ${a.reasoning} | price ${a.price.toFixed(5)} | time ${a.time}`; } };
+  canvas.onmousemove=(e)=>{ const r=canvas.getBoundingClientRect(); const x=e.clientX-r.left; const w=canvas.width; const step=(w-60)/Math.max(1,bars.length); const i=Math.max(0,Math.round((x-40-step/2)/step)); const t=bars[Math.min(i,bars.length-1)]?.time; const a=annotations.find((v)=>v.barTime===t); if(a){ tooltip.textContent=`${a.ruleName} | ${a.reasoning} | price ${a.price.toFixed(5)} | time ${a.barTime}`; } };
 };
 
 export const renderExplain = (el: HTMLElement, explain: ExplainState, pnl: number) => {
-  el.innerHTML = `<h3>Explain Panel</h3><p>classification: ${explain.template}</p><p>current bias: ${explain.bias}</p><p>current stage: ${explain.stage}</p><p>entry allowed: ${explain.entryAllowed}</p><p>recommended target: ${explain.target ?? 'none'} pips</p><h4>why</h4><ul>${explain.reasons.map((r)=>`<li>${r}</li>`).join('')}</ul><h4>missing conditions</h4><ul>${explain.missing.map((m)=>`<li>${m}</li>`).join('')}</ul><p><b>Total PnL:</b> ${pnl.toFixed(1)} pips</p>`;
+  el.innerHTML = `<h3>Explain Panel</h3><p>classification: ${explain.template}</p><p>current bias: ${explain.bias}</p><p>current stage: ${explain.stage}</p><p>entry allowed: ${explain.entryAllowed}</p><p>recommended target: ${explain.targetTier ?? 'none'} pips</p><h4>why</h4><ul>${explain.reasons.map((r)=>`<li>${r}</li>`).join('')}</ul><h4>missing conditions</h4><ul>${explain.missingConditions.map((m)=>`<li>${m}</li>`).join('')}</ul><p><b>Total PnL:</b> ${pnl.toFixed(1)} pips</p>`;
 };
 
 

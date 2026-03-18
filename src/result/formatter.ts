@@ -51,7 +51,7 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
     return candidates.map((candidate) => ({
       symbol: dataset.symbol,
       candidate,
-      dayAnalysis: evaluateDay(candidate.type, aggregateFrom1m(dataset.bars1m, '5m'), candidate.date, replyMode, { entry: 0, exit: 0 }),
+      dayAnalysis: evaluateDay(candidate.type, dataset.bars1m, candidate.date, replyMode, { entry: 0, exit: 0 }),
     }));
   });
 
@@ -65,7 +65,7 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
   const dayChoices = practiceOnly ? screenedDayChoices : allDayChoices;
   const selectedDayValue = selectedDate || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10);
 
-  const dayAnalysis = evaluateDay(line, aggregateFrom1m(active.bars1m, '5m'), selectedDayValue, replyMode, manualTrade);
+  const dayAnalysis = evaluateDay(line, active.bars1m, selectedDayValue, replyMode, manualTrade);
   const dayBars = bars.filter((bar) => bar.time.slice(0, 10) === selectedDayValue);
 
   return {
