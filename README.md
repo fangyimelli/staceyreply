@@ -28,9 +28,10 @@ Local single-page app for Day 3 practice/reply workflow. It loads local OHLCV CS
 
 ## Confirmed features
 
+- React + `src/main.tsx` is the only application entrypoint and local startup path.
 - Daily template evaluation for FGD / FRD with rule-traceable pass/fail output.
-- Intraday evaluation now exposes: stop hunt, 123 node 1/2/3 + breakout, move30, quarter-hour rotation tag, and engulfment state.
-- Explain panel shows per-rule pass/fail reasons plus price/time evidence for annotations and review.
+- Intraday evaluation now exposes: source, stop hunt, 123 node 1/2/3, 20EMA confirm, entry/stop, and fixed TP30/35/40/50 annotations with rule-traceable hover evidence.
+- Explain panel shows template classification, bias, stage, missing conditions, can-enter / cannot-enter reasons, and per-rule pass/fail evidence.
 - Pip-aware scoring now converts prices by symbol/decimals, blocks entries when stop distance exceeds 20 pips, and grades fixed TP30/35/40/50 targets with missing-condition feedback.
 - Local sample mode, local CSV/JSON upload, and acceptance-checklist-oriented workflow remain supported.
 
@@ -326,7 +327,7 @@ Uploaded CSV/folder data runs through this pipeline first and is treated as the 
 - Strategy engine logic: `src/strategy/engine.ts`
 - Annotation construction: `src/strategy/engine.ts` (returned `annotations`)
 - UI composition/state: `src/App.tsx`
-- Chart rendering: `src/ui/ChartPanel.tsx` and `src/ui/render.ts`
+- Chart rendering: `src/ui/ChartPanel.tsx`
 - Explain panel rendering: `src/ui/ExplainPanel.tsx`
 
 ### Inspect computed FRD / FGD candidate dates
