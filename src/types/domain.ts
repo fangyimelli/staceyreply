@@ -12,8 +12,18 @@ export interface InternalExplainState {
   stage: string;
   missingConditions: string[];
   reasons: string[];
+  evidenceDetails: string[];
   entryAllowed: boolean;
   targetTier: 30 | 35 | 40 | 50 | null;
+  ruleTrace: RuleTraceItem[];
+}
+
+export interface RuleTraceItem {
+  ruleId: string;
+  passed: boolean;
+  detail: string;
+  prices: Record<string, number>;
+  times: Record<string, string>;
 }
 
 export interface InternalAnnotation {
