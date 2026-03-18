@@ -87,6 +87,7 @@ export default function App() {
         <label><input type="checkbox" checked={enableFGD} onChange={(e) => setEnableFGD(e.target.checked)} />FGD on</label>
         <label><input type="checkbox" checked={enableFRD} onChange={(e) => setEnableFRD(e.target.checked)} />FRD on</label>
         <label><input type="checkbox" checked={practiceOnly} onChange={(e) => setPracticeOnly(e.target.checked)} />Practice mode (filtered dates only)</label>
+        <label><input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />Debug panel</label>
         <select value={day} onChange={(e) => setSelectedDate(e.target.value)}>{uiPayload.dayChoices.map((d) => <option key={d}>{d}</option>)}</select>
         <select value={replyMode} onChange={(e) => setReplyMode(e.target.value as ReplyMode)}><option value="auto">Auto Reply</option><option value="manual">Manual Reply</option></select>
         {replyMode === 'manual' && (

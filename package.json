@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "Vite SPA entry: index.html -> src/main.tsx -> src/App.tsx",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4173",
     "build": "npm run check && vite build",
