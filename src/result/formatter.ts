@@ -1,4 +1,5 @@
 import { aggregateFrom1m } from '../aggregation/timeframe';
+import { dailyBucketKeyNy } from '../utils/nyDate';
 import type {
   DebugPayload,
   FrontendScreenedPayload,
@@ -109,7 +110,7 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
   const bars = active.bars1m.length > 0 ? aggregateFrom1m(active.bars1m, timeframe) : [];
   const screenedDayChoices = screenedResults.filter((row) => row.symbol === active.symbol).map((row) => row.candidateDate);
   const fallbackImportedDates = importedSignalRows.map((row) => row.date);
-  const allDayChoices = [...new Set(bars.map((bar) => bar.time.slice(0, 10)))];
+  const allDayChoices = [...new Set(bars.map((bar) => dailyBucketKeyNy(bar.time)))];
   const dayChoices = practiceOnly
     ? screenedDayChoices.length
       ? screenedDayChoices
@@ -117,7 +118,7 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
     : allDayChoices.length
       ? allDayChoices
       : fallbackImportedDates;
-  const selectedDayValue = selectedDay || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10) || importedSignalRows[0]?.date || '';
+  const selectedDayValue = selectedDay || dayChoices[0] || (bars.length > 0 ? dailyBucketKeyNy(bars[bars.length - 1].time) : '') || importedSignalRows[0]?.date || '';
 
   const replayStartIndex = replayDayAnalysis?.replayStartIndex ?? 0;
   const replayEndIndex = replayDayAnalysis?.replayEndIndex ?? 0;

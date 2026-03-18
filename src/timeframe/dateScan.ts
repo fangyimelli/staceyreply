@@ -1,13 +1,10 @@
 import { Candle, DetectedDate } from "../types.js";
-
-function nyDate(ts: string): string {
-  return new Date(ts).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-}
+import { dailyBucketKeyNy } from "../utils/nyDate";
 
 export function scanCandidateDates(candles: Candle[]): DetectedDate[] {
   const byDate = new Map<string, Candle[]>();
   candles.forEach((c) => {
-    const d = nyDate(c.time);
+    const d = dailyBucketKeyNy(c.time);
     byDate.set(d, [...(byDate.get(d) ?? []), c]);
   });
 
