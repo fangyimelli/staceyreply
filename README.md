@@ -132,10 +132,10 @@ Backend-provided datasets are treated as the primary source for analysis. Built-
 
 ### Timezone assumptions
 - Session window logic in strategy uses `America/New_York` conversion for `07:00` to `11:00` checks.
-- Time bucketing for aggregation currently uses UTC-derived minute grouping.
+- Time bucketing for aggregation uses shared `America/New_York` date/time bucket keys for `1D`, `5m`, `15m`, `1h`, and `4h`.
 
 ### How 1m is aggregated into 5m / 15m / 1h / 4h / 1D
-1. Select timeframe key based on bar timestamp.
+1. Select timeframe key from the bar timestamp converted into `America/New_York`.
 2. Group bars by timeframe bucket key.
 3. Emit OHLCV per group:
    - open = first open
