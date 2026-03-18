@@ -25,6 +25,14 @@ export interface OhlcvBar {
   rawDateText?: string;
   sourceTime?: string;
   normalizedTime?: string;
+  sourceStartTime?: string;
+  sourceEndTime?: string;
+  traceTimes?: Array<{
+    normalizedTime: string;
+    sourceTime: string;
+    rawTimeText?: string;
+    rawDateText?: string;
+  }>;
   timeSemantics?: TimeSemantics;
   open: number;
   high: number;
