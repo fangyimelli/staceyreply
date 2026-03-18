@@ -4,8 +4,31 @@ const normalizeBars = (bars: OhlcvBar[]) => bars
   .filter((bar) => Number.isFinite(bar.open) && Number.isFinite(bar.high) && Number.isFinite(bar.low) && Number.isFinite(bar.close))
   .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
+const isMtFixedEstRow = (line: string) => /^\d{4}\.\d{2}\.\d{2}[\t, ]+\d{2}:\d{2}([\t, ]+-?\d+(?:\.\d+)?){5}$/.test(line.trim());
+
+const toFixedEstIso = (dateText: string, timeText: string) => {
+  const [year, month, day] = dateText.split('.');
+  return `${year}-${month}-${day}T${timeText}:00-05:00`;
+};
+
+const parseMtFixedEst = (raw: string): OhlcvBar[] => normalizeBars(raw
+  .trim()
+  .split(/\r?\n/)
+  .filter((line) => line.trim().length > 0)
+  .map((line) => line.trim().split(/\t+|,+|\s{2,}/))
+  .filter((parts) => parts.length >= 7)
+  .map(([date, time, open, high, low, close, volume]) => ({
+    time: toFixedEstIso(date, time),
+    open: Number(open),
+    high: Number(high),
+    low: Number(low),
+    close: Number(close),
+    volume: Number(volume ?? 0),
+  })));
+
 const parseCsv = (raw: string): OhlcvBar[] => {
   const lines = raw.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length && isMtFixedEstRow(lines[0])) return parseMtFixedEst(raw);
   const header = lines[0]?.toLowerCase().split(',').map((item) => item.trim()) ?? [];
   if (header.join(',') !== 'time,open,high,low,close,volume') return [];
   return normalizeBars(lines.slice(1).map((line) => {

@@ -5,6 +5,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 ## Confirmed features
 - 固定資料夾掃描：`staceyreply/dist/mnt/data`
 - 啟動後自動讀取 CSV/JSON 歷史資料，不提供上傳/拖曳 UI
+- 自動匯入 MT 固定 EST（UTC-5、無 DST）tabular CSV，並轉成內部標準 OHLCV 時間格式
 - 1m / 5m / 15m / 1h / 4h / 1D timeframe 切換
 - FGD / FRD Day 3 規則驗證
 - dataset validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
@@ -24,7 +25,7 @@ npm run dev
 1. 專案啟動時以 `import.meta.glob` 掃描 `dist/mnt/data/*.{csv,json}`。
 2. 每個檔案都被視為已預篩的 FRD/FGD 候選資料來源。
 3. UI 只提供 dataset selector，不提供任何 upload / drag-and-drop 流程。
-4. parser 會把 `time,open,high,low,close,volume` 轉成 1m bars。
+4. parser 會把標準 `time,open,high,low,close,volume` CSV/JSON 轉成 1m bars，也會自動辨識 MT 固定 EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式並轉成帶 `-05:00` 的時間欄位。
 5. strategy / validation 仍會重新檢查資料是否真的足夠形成 Day 3 模板。
 
 ## Dataset switching
