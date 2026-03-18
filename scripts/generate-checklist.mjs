@@ -12,6 +12,7 @@ const confirmed = [
   'Support 1m / 5m / 15m / 1h / 4h / 1D',
   'Rebuild higher timeframes from 1m',
   'Use America/New_York timezone',
+  'DST normalization keeps raw file unchanged while strategy session aligns to America/New_York',
   'Main chart must be a real candlestick chart',
   'Candles must have uniform TradingView-like thickness and spacing',
   'Chart must clearly display date/time on the x-axis',

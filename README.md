@@ -5,7 +5,9 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 ## Confirmed features
 - 固定資料夾掃描：`staceyreply/dist/mnt/data`
 - 啟動後自動讀取 CSV/JSON 歷史資料，不提供上傳/拖曳 UI
-- 自動匯入 MT 固定 EST（UTC-5、無 DST）tabular CSV，並轉成內部標準 OHLCV 時間格式
+- 自動匯入 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在 app 內建立 normalized strategy time
+- 策略 session/day bucket 一律使用 `America/New_York`
+- 當來源資料為 MT fixed EST 且紐約進入夏令時間時，內部 normalized strategy time 會自動調整 1 小時，讓 session 對齊紐約交易時段
 - 1m / 5m / 15m / 1h / 4h / 1D timeframe 切換
 - FGD / FRD Day 3 規則驗證
 - dataset validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
@@ -25,8 +27,11 @@ npm run dev
 1. 專案啟動時以 `import.meta.glob` 掃描 `dist/mnt/data/*.{csv,json}`。
 2. 每個檔案都被視為已預篩的 FRD/FGD 候選資料來源。
 3. UI 只提供 dataset selector，不提供任何 upload / drag-and-drop 流程。
-4. parser 會把標準 `time,open,high,low,close,volume` CSV/JSON 轉成 1m bars，也會自動辨識 MT 固定 EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式並轉成帶 `-05:00` 的時間欄位。
-5. strategy / validation 仍會重新檢查資料是否真的足夠形成 Day 3 模板。
+4. parser 會把標準 `time,open,high,low,close,volume` CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
+5. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
+6. `source/raw time` 的語義是 MT fixed EST / UTC-5 / no DST；`normalized strategy time` 的語義是 `America/New_York`，供 strategy、session、day bucket 與 replay UI 使用。
+7. 若來源時間落在紐約夏令時間期間，normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
+8. strategy / validation 仍會重新檢查資料是否真的足夠形成 Day 3 模板。
 
 ## Dataset switching
 - 左上 `Dataset` 下拉選單切換商品 / 檔案
@@ -36,7 +41,8 @@ npm run dev
 ## Timeframe switching
 - `Timeframe` 可切換 1m / 5m / 15m / 1h / 4h / 1D
 - 高週期一律由 1m 原始資料聚合
-- 顯示與 session 邏輯使用 America/New_York
+- 顯示與 session 邏輯使用 `America/New_York`
+- 若來源為 MT fixed EST，UI 會同時保留 source/raw time 供對照，並以 normalized strategy time 作為主要策略時間
 
 ## Replay controls
 ### Auto Replay
@@ -53,11 +59,11 @@ npm run dev
 - 停止播放並保留目前 `lastReplyEval`
 
 ## Explain Panel 怎麼看
-- **Current Classification**：目前模板、bias、stage、可否回覆/進場
+- **Current Classification**：目前模板、bias、stage、可否回覆/進場，以及當前採用的時間語義
 - **Historical Reasoning Timeline**：累積已發生事件與敘事
 - **Missing Conditions**：現在缺哪個 gate、為什麼還不能進
-- **Rule Trace**：規則名、價格、時間、timeframe、pass/fail 原因
-- **Diagnostics**：debug / gate state / lastReplyEval
+- **Rule Trace**：規則名、價格、時間、timeframe、pass/fail 原因，以及 session/day bucket 採用哪種時間語義
+- **Diagnostics**：debug / gate state / lastReplyEval / replay bar source vs normalized time / DST adjustment 狀態
 
 ## Error messages
 當資料不足時，會明確顯示例如：

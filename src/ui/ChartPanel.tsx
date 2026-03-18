@@ -19,6 +19,13 @@ interface Props {
 type ChartRow = OhlcvBar & { label: string; ema20: number; wickTop: number };
 
 const traceText = (trace: RuleTraceItem[]) => trace.map((item) => `${item.ruleName}: ${item.passed ? 'pass' : 'fail'} (${item.reason})`).join(' | ');
+const normalizedLabel = (barTime?: string) => barTime ? toNyLabel(barTime) : 'n/a';
+const sourceLabel = (bar?: Pick<OhlcvBar, 'sourceTime' | 'rawDateText' | 'rawTimeText' | 'time'>) => {
+  if (!bar) return 'n/a';
+  if (bar.rawDateText && bar.rawTimeText) return `${bar.rawDateText} ${bar.rawTimeText}`;
+  return bar.sourceTime ?? bar.time;
+};
+const dstAdjusted = (bar?: Pick<OhlcvBar, 'sourceTime' | 'normalizedTime'>) => Boolean(bar?.sourceTime && bar?.normalizedTime && bar.sourceTime !== bar.normalizedTime);
 
 const CandlestickLayer = ({ formattedGraphicalItems }: any) => {
   const points = formattedGraphicalItems?.[0]?.props?.points;
@@ -47,11 +54,13 @@ const CustomTooltip = ({ active, payload }: any) => {
     {annotation ? <>
       <div>Rule: {annotation.label}</div>
       <div>Reason: {annotation.reasoning}</div>
-      <div>Time: {toNyLabel(annotation.barTime)}</div>
+      <div>Normalized time: {normalizedLabel(annotation.barTime)}</div>
       <div>Price: {annotation.price.toFixed(4)}</div>
       <div>Trace: {traceText(annotation.trace)}</div>
     </> : candle ? <>
-      <div>{toNyLabel(candle.time)}</div>
+      <div>Normalized time: {normalizedLabel(candle.normalizedTime ?? candle.time)}</div>
+      <div>Source time: {sourceLabel(candle)}</div>
+      {dstAdjusted(candle) && <div>DST-adjusted</div>}
       <div>O {candle.open.toFixed(4)} H {candle.high.toFixed(4)} L {candle.low.toFixed(4)} C {candle.close.toFixed(4)}</div>
       <div>20EMA {candle.ema20.toFixed(4)}</div>
     </> : null}
