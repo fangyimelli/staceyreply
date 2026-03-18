@@ -27,7 +27,7 @@ npm run dev
 1. 專案啟動時以 `import.meta.glob` 掃描 `dist/mnt/data/*.{csv,json}`。
 2. 每個檔案都被視為已預篩的 FRD/FGD 候選資料來源。
 3. UI 只提供 dataset selector，不提供任何 upload / drag-and-drop 流程。
-4. parser 會把標準 `time,open,high,low,close,volume` CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
+4. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
 5. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
 6. `source/raw time` 的語義是 MT fixed EST / UTC-5 / no DST；`normalized strategy time` 的語義是 `America/New_York`，供 strategy、session、day bucket 與 replay UI 使用。
 7. 若來源時間落在紐約夏令時間期間，normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
@@ -77,6 +77,30 @@ npm run dev
 - 圖表上方狀態列
 - 右側 Explain Panel
 - 下方 Diagnostics
+
+## Accepted parser formats
+- CSV 支援 UTF-8 BOM 自動移除。
+- CSV 支援逗號或 tab 分隔。
+- CSV/JSON 必要欄位：
+  - 時間欄位可接受：`time` / `date` / `datetime` / `timestamp`
+  - 價格欄位需為：`open` / `high` / `low` / `close`
+  - 成交量欄位可省略；可接受：`volume` / `vol`
+- 若 `volume` / `vol` 缺席，系統會以 `0` 補入，不阻擋載入。
+- 若是 MT fixed EST 表格式資料，仍接受 `YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`。
+
+## Parser diagnostics
+若 dataset 無法載入，dataset 不會直接從 UI 消失；Diagnostics 會保留並顯示失敗原因，例如：
+- `CSV is empty.`
+- `CSV header is missing required columns: time, open, high, low, close.`
+- `Row N: open/high/low/close must be numeric.`
+- `JSON parse failed: ...`
+- `JSON root must be an array of OHLC objects.`
+- `Item N: missing time/date/datetime/timestamp field.`
+
+Diagnostics 也會同步列出：
+- 偵測到的分隔符（comma / tab）
+- 允許的 header / key 別名
+- volume 是否由來源載入，或因為省略而預設為 `0`
 
 ## Sample mode
 - 直接選 `SAMPLE-REPLAY (sample mode)`

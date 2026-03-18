@@ -64,6 +64,9 @@ export interface ParsedDataset {
   bars1m: OhlcvBar[];
   sourceLabel: string;
   isSample: boolean;
+  parseStatus: 'success' | 'error';
+  parseErrors: string[];
+  parseDiagnostics: string[];
 }
 
 export interface DatasetValidationIssue {
