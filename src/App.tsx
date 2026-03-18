@@ -87,6 +87,14 @@ export default function App() {
   );
   const uiPayload: FrontendScreenedPayload = formatted.payload;
   const screenedResults = uiPayload.screenedResults;
+  const importedSignalRows = activeDataset?.metadata.signals.length
+    ? activeDataset.metadata.signals.map((signal) => ({
+        pair: signal.pair,
+        date: signal.date,
+        signal: signal.signal,
+        status: 'backend' as const,
+      }))
+    : uiPayload.importedSignalRows.filter((row) => row.pair === uiPayload.activeSymbol);
   const day = uiPayload.selectedDay;
 
   useEffect(() => {
@@ -223,38 +231,68 @@ export default function App() {
         <div>目前揭露進度: {uiPayload.revealedBars.length} / {uiPayload.fullDayBars.length} 根（index {replayState.currentBarIndex}）</div>
       </section>
 
-      <section style={{ margin: '12px 0' }}>
-        <h3>Screened Results (Final)</h3>
-        {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).length === 0 ? (
-          <p>No final screened results passed for this symbol.</p>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>Symbol</th>
-                <th style={{ textAlign: 'left' }}>Candidate Date</th>
-                <th style={{ textAlign: 'left' }}>Line Type</th>
-                <th style={{ textAlign: 'left' }}>Validity</th>
-                <th style={{ textAlign: 'left' }}>Replay Availability</th>
-                <th style={{ textAlign: 'left' }}>Recommended Next Action</th>
-                <th style={{ textAlign: 'left' }}>Current Target Tier</th>
-              </tr>
-            </thead>
-            <tbody>
-              {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).map((row) => (
-                <tr key={`${row.symbol}-${row.candidateDate}-${row.lineType}`}>
-                  <td>{row.symbol}</td>
-                  <td>{row.candidateDate}</td>
-                  <td>{row.lineType}</td>
-                  <td>{row.validity}</td>
-                  <td>{row.replayAvailable ? 'available' : 'not available'}</td>
-                  <td>{row.recommendedNextAction}</td>
-                  <td>{row.currentTargetTier ? `${row.currentTargetTier} pips` : 'n/a'}</td>
+      <section style={{ margin: '12px 0', display: 'grid', gap: 12 }}>
+        <div>
+          <h3>已匯入資料 / 候選清單</h3>
+          {importedSignalRows.length === 0 ? (
+            <p>No imported candidate rows found for this symbol.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Pair</th>
+                  <th style={{ textAlign: 'left' }}>Date</th>
+                  <th style={{ textAlign: 'left' }}>Signal</th>
+                  <th style={{ textAlign: 'left' }}>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {importedSignalRows.map((row) => (
+                  <tr key={`${row.pair}-${row.date}-${row.signal}-${row.status ?? 'na'}`}>
+                    <td>{row.pair}</td>
+                    <td>{row.date}</td>
+                    <td>{row.signal}</td>
+                    <td>{row.status ?? 'n/a'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div>
+          <h3>Screened Results (Final)</h3>
+          {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).length === 0 ? (
+            <p>No final screened results passed for this symbol.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Symbol</th>
+                  <th style={{ textAlign: 'left' }}>Candidate Date</th>
+                  <th style={{ textAlign: 'left' }}>Signal (FGD/FRD)</th>
+                  <th style={{ textAlign: 'left' }}>Validity</th>
+                  <th style={{ textAlign: 'left' }}>Replay Availability</th>
+                  <th style={{ textAlign: 'left' }}>Recommended Next Action</th>
+                  <th style={{ textAlign: 'left' }}>Current Target Tier</th>
+                </tr>
+              </thead>
+              <tbody>
+                {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).map((row) => (
+                  <tr key={`${row.symbol}-${row.candidateDate}-${row.lineType}`}>
+                    <td>{row.symbol}</td>
+                    <td>{row.candidateDate}</td>
+                    <td>{row.lineType}</td>
+                    <td>{row.validity}</td>
+                    <td>{row.replayAvailable ? 'available' : 'not available'}</td>
+                    <td>{row.recommendedNextAction}</td>
+                    <td>{row.currentTargetTier ? `${row.currentTargetTier} pips` : 'n/a'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </section>
 
       {debugMode && (

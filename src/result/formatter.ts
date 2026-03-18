@@ -3,6 +3,7 @@ import { detectCandidates, evaluateDay } from '../strategy/engine';
 import type {
   DebugPayload,
   FrontendScreenedPayload,
+  ImportedSignalRow,
   InternalCandidateAnalysis,
   OhlcvBar,
   ReplyMode,
@@ -14,6 +15,7 @@ import type {
 
 const emptyPayload = (): { payload: FrontendScreenedPayload; debug: DebugPayload } => ({
   payload: {
+    importedSignalRows: [],
     screenedResults: [],
     activeSymbol: '',
     bars: [],
@@ -82,6 +84,14 @@ const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode
   };
 };
 
+
+const toImportedSignalRow = (analysis: InternalCandidateAnalysis): ImportedSignalRow => ({
+  pair: analysis.symbol,
+  date: analysis.candidate.date,
+  signal: analysis.candidate.type,
+  status: analysis.dayAnalysis.explain.entryAllowed ? 'pass' : 'fail',
+});
+
 const buildReplayPayload = (dayBars: OhlcvBar[], replayWindow?: FormatterConfig['replayWindow']) => {
   const replayStartIndex = 0;
   const replayEndIndex = Math.max(dayBars.length - 1, 0);
@@ -116,6 +126,7 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
     }));
   });
 
+  const importedSignalRows = internalCandidateAnalysis.map((analysis) => toImportedSignalRow(analysis));
   const screenedResults = internalCandidateAnalysis.map((analysis) => toScreenedRow(analysis, replyMode)).filter((row) => row.validity === 'pass');
 
   const active = datasets.find((dataset) => dataset.symbol === symbol) ?? datasets[0];
@@ -133,6 +144,7 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
 
   return {
     payload: {
+      importedSignalRows,
       screenedResults,
       activeSymbol: active.symbol,
       bars,
