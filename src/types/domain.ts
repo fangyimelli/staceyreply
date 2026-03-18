@@ -165,6 +165,23 @@ export interface DebugPayload {
   internalCandidateAnalysis: InternalCandidateAnalysis[];
 }
 
+export interface FrontendScreenedPayload {
+  screenedResults: ScreenedResultRow[];
+  activeSymbol: string;
+  bars: OhlcvBar[];
+  dayChoices: string[];
+  selectedDay: string;
+  dayBars: OhlcvBar[];
+  ema20: number[];
+  dayAnalysis: InternalDayAnalysis;
+}
+
+// Debug-only payload structures.
+export interface DebugPayload {
+  candidatesBySymbol: Record<string, CandidateDate[]>;
+  internalCandidateAnalysis: InternalCandidateAnalysis[];
+}
+
 // Backwards-compatible aliases used by existing UI components.
 export type Annotation = InternalAnnotation;
 export type ExplainState = InternalExplainState;
