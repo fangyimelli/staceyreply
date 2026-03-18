@@ -3,12 +3,18 @@ import { sampleBars } from './data/sampleData';
 import { parseFile } from './parser/parseLocalData';
 import { parseFrdFgdWindows } from './parser/parseFrdFgdWindows';
 import { formatFrontendScreenedPayload } from './result/formatter';
-import type { FrontendScreenedPayload, ReplyMode, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
+import type { FrontendScreenedPayload, ReplayState, ReplyMode, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
 import { formatDebugArtifacts, formatDebugPayload } from './ui/debugFormat';
 import { ExplainPanel } from './ui/ExplainPanel';
 
 const timeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
+const replaySpeedOptions = [250, 500, 1000, 1500] as const;
+
+const clampIndex = (index: number, start: number, end: number) => {
+  if (end < start) return start;
+  return Math.min(Math.max(index, start), end);
+};
 
 export default function App() {
   const [datasets, setDatasets] = useState<SymbolDataset[]>([{ symbol: 'SAMPLE', bars1m: sampleBars() }]);
@@ -24,6 +30,14 @@ export default function App() {
   const [manualExit, setManualExit] = useState('');
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [totalPnl, setTotalPnl] = useState(0);
+  const [replayState, setReplayState] = useState<ReplayState>({
+    isPlaying: false,
+    isFinished: false,
+    currentBarIndex: 0,
+    playSpeed: 500,
+    replayStartIndex: 0,
+    replayEndIndex: 0,
+  });
 
   useEffect(() => {
     const loadBuiltInWindows = async () => {
@@ -55,12 +69,80 @@ export default function App() {
         practiceOnly,
         selectedDate,
         manualTrade: { entry: Number(manualEntry), exit: Number(manualExit) },
+        replayWindow: {
+          currentBarIndex: replayState.currentBarIndex,
+          replayStartIndex: replayState.replayStartIndex,
+          replayEndIndex: replayState.replayEndIndex,
+        },
       }),
-    [datasets, enableFGD, enableFRD, replyMode, symbol, tf, line, practiceOnly, selectedDate, manualEntry, manualExit]
+    [
+      datasets,
+      enableFGD,
+      enableFRD,
+      replyMode,
+      symbol,
+      tf,
+      line,
+      practiceOnly,
+      selectedDate,
+      manualEntry,
+      manualExit,
+      replayState.currentBarIndex,
+      replayState.replayStartIndex,
+      replayState.replayEndIndex,
+    ]
   );
   const uiPayload: FrontendScreenedPayload = formatted.payload;
   const screenedResults = uiPayload.screenedResults;
   const day = uiPayload.selectedDay;
+
+  useEffect(() => {
+    setReplayState((current) => {
+      const nextStart = uiPayload.replayDefaults.replayStartIndex;
+      const nextEnd = uiPayload.replayDefaults.replayEndIndex;
+      const shouldReset =
+        current.replayStartIndex !== nextStart ||
+        current.replayEndIndex !== nextEnd ||
+        current.currentBarIndex < nextStart ||
+        current.currentBarIndex > nextEnd;
+
+      if (!shouldReset) return current;
+
+      return {
+        ...current,
+        isPlaying: false,
+        isFinished: false,
+        currentBarIndex: nextStart,
+        replayStartIndex: nextStart,
+        replayEndIndex: nextEnd,
+      };
+    });
+  }, [uiPayload.replayDefaults.replayStartIndex, uiPayload.replayDefaults.replayEndIndex, day]);
+
+  useEffect(() => {
+    if (!replayState.isPlaying || replayState.isFinished) return undefined;
+
+    const timer = window.setTimeout(() => {
+      setReplayState((current) => {
+        const nextIndex = current.currentBarIndex + 1;
+        if (nextIndex >= current.replayEndIndex) {
+          return {
+            ...current,
+            currentBarIndex: current.replayEndIndex,
+            isPlaying: false,
+            isFinished: true,
+          };
+        }
+
+        return {
+          ...current,
+          currentBarIndex: nextIndex,
+        };
+      });
+    }, replayState.playSpeed);
+
+    return () => window.clearTimeout(timer);
+  }, [replayState.isPlaying, replayState.isFinished, replayState.playSpeed, replayState.currentBarIndex, replayState.replayEndIndex]);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files) return;
@@ -70,9 +152,51 @@ export default function App() {
     setSymbol(nextDatasets[0]?.symbol ?? 'SAMPLE');
   };
 
-  const runTrade = () => {
+  const applyTradeToPnl = () => {
     const trade = uiPayload.dayAnalysis.trade;
     if (trade) setTotalPnl((value) => value + trade.pnlPips);
+  };
+
+  const startReplay = () => {
+    setReplayState((current) => ({
+      ...current,
+      isPlaying: current.replayEndIndex > current.replayStartIndex,
+      isFinished: current.currentBarIndex >= current.replayEndIndex,
+    }));
+  };
+
+  const pauseReplay = () => {
+    setReplayState((current) => ({ ...current, isPlaying: false }));
+  };
+
+  const finishReplay = () => {
+    setReplayState((current) => ({
+      ...current,
+      isPlaying: false,
+      isFinished: true,
+      currentBarIndex: current.replayEndIndex,
+    }));
+  };
+
+  const replayAgain = () => {
+    setReplayState((current) => ({
+      ...current,
+      isPlaying: false,
+      isFinished: false,
+      currentBarIndex: current.replayStartIndex,
+    }));
+  };
+
+  const stepReplay = (direction: -1 | 1) => {
+    setReplayState((current) => {
+      const nextIndex = clampIndex(current.currentBarIndex + direction, current.replayStartIndex, current.replayEndIndex);
+      return {
+        ...current,
+        isPlaying: false,
+        currentBarIndex: nextIndex,
+        isFinished: nextIndex >= current.replayEndIndex,
+      };
+    });
   };
 
   return (
@@ -96,8 +220,22 @@ export default function App() {
             <input placeholder="exit" value={manualExit} onChange={(e: any) => setManualExit(e.target.value)} />
           </>
         )}
-        <button onClick={runTrade}>Apply trade to PnL</button>
+        <button onClick={startReplay} disabled={uiPayload.revealedBars.length === 0 || replayState.isPlaying}>開始播放</button>
+        <button onClick={pauseReplay} disabled={!replayState.isPlaying}>暫停</button>
+        <button onClick={finishReplay} disabled={uiPayload.revealedBars.length === 0 || replayState.isFinished}>結束</button>
+        <button onClick={replayAgain} disabled={uiPayload.fullDayBars.length === 0}>重播</button>
+        <button onClick={() => stepReplay(-1)} disabled={replayState.currentBarIndex <= replayState.replayStartIndex}>上一根</button>
+        <button onClick={() => stepReplay(1)} disabled={replayState.currentBarIndex >= replayState.replayEndIndex}>下一根</button>
+        <select value={replayState.playSpeed} onChange={(e: any) => setReplayState((current) => ({ ...current, playSpeed: Number(e.target.value) }))}>
+          {replaySpeedOptions.map((speed) => <option key={speed} value={speed}>{speed} ms</option>)}
+        </select>
+        <button onClick={applyTradeToPnl}>Apply trade to PnL</button>
       </div>
+
+      <section style={{ margin: '12px 0', padding: 10, background: '#f8fafc', border: '1px solid #cbd5e1' }}>
+        <strong>Replay 範圍:</strong> {uiPayload.replayMeta.scopeLabel}
+        <div>目前揭露進度: {uiPayload.revealedBars.length} / {uiPayload.fullDayBars.length} 根（index {replayState.currentBarIndex}）</div>
+      </section>
 
       <section style={{ margin: '12px 0' }}>
         <h3>Screened Results (Final)</h3>
@@ -155,8 +293,8 @@ export default function App() {
       <div style={{ display: 'flex', gap: 8 }}>
         <div style={{ flex: 1 }}>
           <ChartPanel
-            bars={uiPayload.dayBars}
-            ema20={uiPayload.ema20}
+            bars={uiPayload.revealedBars}
+            ema20={uiPayload.revealedEma20}
             annotations={uiPayload.dayAnalysis.annotations}
             previousClose={uiPayload.dayAnalysis.previousClose}
             hos={uiPayload.dayAnalysis.hos}
