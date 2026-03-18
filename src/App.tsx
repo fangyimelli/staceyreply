@@ -66,7 +66,6 @@ export default function App() {
   const importedDates = useMemo(() => (activeDataset?.importedSignals ?? []).map((row) => row.date), [activeDataset]);
   const screenedDatesForActive = useMemo(
     () => (staticAnalysisBySymbol[activeDataset?.symbol ?? '']?.candidateAnalysis ?? [])
-      .filter((analysis) => analysis.dayAnalysis.explain.entryAllowed)
       .map((analysis) => analysis.candidate.date),
     [staticAnalysisBySymbol, activeDataset],
   );
@@ -112,6 +111,10 @@ export default function App() {
   const screenedResults = uiPayload.screenedResults;
   const importedSignalRows = uiPayload.importedSignalRows;
   const day = uiPayload.selectedDay;
+  const activeScreenedResults = useMemo(
+    () => screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol),
+    [screenedResults, uiPayload.activeSymbol],
+  );
 
   useEffect(() => {
     setReplayState((current) => {
@@ -229,7 +232,7 @@ export default function App() {
         </select>
         <label><input type="checkbox" checked={enableFGD} onChange={(e: any) => setEnableFGD(e.target.checked)} disabled={!hasReplayableBars} />FGD on</label>
         <label><input type="checkbox" checked={enableFRD} onChange={(e: any) => setEnableFRD(e.target.checked)} disabled={!hasReplayableBars} />FRD on</label>
-        <label><input type="checkbox" checked={practiceOnly} onChange={(e: any) => setPracticeOnly(e.target.checked)} />Practice mode (filtered dates only)</label>
+        <label><input type="checkbox" checked={practiceOnly} onChange={(e: any) => setPracticeOnly(e.target.checked)} />Practice mode (candidate dates only)</label>
         <select value={day} onChange={(e: any) => setSelectedDate(e.target.value)}>{uiPayload.dayChoices.map((d) => <option key={d}>{d}</option>)}</select>
         <select value={replyMode} onChange={(e: any) => setReplyMode(e.target.value as ReplyMode)} disabled={!hasReplayableBars}><option value="auto">Auto Reply</option><option value="manual">Manual Reply</option></select>
         {replyMode === 'manual' && (
@@ -297,8 +300,8 @@ export default function App() {
           <p style={{ marginTop: 0, color: '#475569' }}>以下結果只會在存在 replayable 1m bars 或 sample/synthetic fallback 時產生，避免和原始匯入欄位混淆。</p>
           {!hasReplayableBars ? (
             <p>目前後台只提供 metadata 摘要；不顯示假 intraday chart，也不執行 replay 分析。</p>
-          ) : screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).length === 0 ? (
-            <p>No final screened results passed for this symbol.</p>
+          ) : activeScreenedResults.length === 0 ? (
+            <p>No detected candidate analysis rows are available for this symbol.</p>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
@@ -308,18 +311,22 @@ export default function App() {
                   <th style={{ textAlign: 'left' }}>Signal (FGD/FRD)</th>
                   <th style={{ textAlign: 'left' }}>Validity</th>
                   <th style={{ textAlign: 'left' }}>Replay Availability</th>
+                  <th style={{ textAlign: 'left' }}>Fail Reason Summary</th>
+                  <th style={{ textAlign: 'left' }}>Missing Conditions</th>
                   <th style={{ textAlign: 'left' }}>Recommended Next Action</th>
                   <th style={{ textAlign: 'left' }}>Current Target Tier</th>
                 </tr>
               </thead>
               <tbody>
-                {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).map((row) => (
+                {activeScreenedResults.map((row) => (
                   <tr key={`${row.symbol}-${row.candidateDate}-${row.lineType}`}>
                     <td>{row.symbol}</td>
                     <td>{row.candidateDate}</td>
                     <td>{row.lineType}</td>
                     <td>{row.validity}</td>
                     <td>{row.replayAvailable ? 'available' : 'not available'}</td>
+                    <td>{row.failReasonSummary ?? 'n/a'}</td>
+                    <td>{row.missingConditionsSummary ?? 'n/a'}</td>
                     <td>{row.recommendedNextAction}</td>
                     <td>{row.currentTargetTier ? `${row.currentTargetTier} pips` : 'n/a'}</td>
                   </tr>
@@ -340,7 +347,7 @@ export default function App() {
           <h4>Internal Rule States</h4>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{formatDebugArtifacts({ rawScanTraces: [], rejectedDates: [], internalRuleStates: [] })}</pre>
           <h4>Passed Rows (Debug Payload)</h4>
-          {screenedResults.filter((row) => row.symbol === symbol).map((row) => (
+          {activeScreenedResults.map((row) => (
             <pre key={`debug-${row.symbol}-${row.candidateDate}-${row.lineType}`} style={{ whiteSpace: 'pre-wrap' }}>
               {row.symbol} {row.candidateDate} {row.lineType}{'\n'}
               {formatDebugPayload(row.debug)}

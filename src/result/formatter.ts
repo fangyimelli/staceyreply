@@ -14,6 +14,21 @@ import type {
 
 const replayScopeLabel = "Day 3 replay starts from the selected NY day's first intraday bar and ends at that day's last intraday bar.";
 
+const isPendingAnalysis = (analysis: InternalCandidateAnalysis): boolean => {
+  const lowerMissingConditions = analysis.dayAnalysis.explain.missingConditions.map((condition) => condition.toLowerCase());
+  const lowerReasons = analysis.dayAnalysis.explain.reasons.map((reason) => reason.toLowerCase());
+
+  return (
+    lowerMissingConditions.some((condition) => condition.includes('no bars available for selected day') || condition.includes('need at least d-2, d-1 and d0 bars'))
+    || lowerReasons.some((reason) => reason.includes('insufficient daily history') || reason.includes('day cannot be evaluated until bars exist'))
+  );
+};
+
+const summarizeList = (items: string[]): string | undefined => {
+  const uniqueItems = [...new Set(items.map((item) => item.trim()).filter(Boolean))];
+  return uniqueItems.length > 0 ? uniqueItems.join(' | ') : undefined;
+};
+
 const emptyPayload = (): { payload: FrontendScreenedPayload; debug: DebugPayload } => ({
   payload: {
     importedSignalRows: [],
@@ -69,7 +84,9 @@ interface FormatterConfig {
 
 const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode): ScreenedResultRow => {
   const replayAvailable = analysis.dayAnalysis.explain.entryAllowed;
-  const validity: ScreenedResultRow['validity'] = replayAvailable ? 'pass' : 'fail';
+  const validity: ScreenedResultRow['validity'] = replayAvailable ? 'pass' : isPendingAnalysis(analysis) ? 'pending' : 'fail';
+  const reasons = analysis.dayAnalysis.explain.reasons;
+  const missingConditions = analysis.dayAnalysis.explain.missingConditions;
 
   return {
     symbol: analysis.symbol,
@@ -79,8 +96,22 @@ const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode
     replayAvailable,
     recommendedNextAction: replayAvailable
       ? `Run ${replyMode === 'auto' ? 'Auto Reply' : 'Manual Reply'} replay`
-      : 'Skip until setup conditions become valid',
+      : validity === 'pending'
+        ? 'Wait for enough data to complete the evaluation'
+        : 'Review fail reasons / missing conditions for this candidate',
     currentTargetTier: analysis.dayAnalysis.explain.targetTier,
+    failReasonSummary: !replayAvailable ? summarizeList(reasons) : undefined,
+    missingConditionsSummary: !replayAvailable ? summarizeList(missingConditions) : undefined,
+    debug: {
+      scanReason: `${analysis.candidate.type} candidate detected on ${analysis.candidate.date}`,
+      rejectionReason: !replayAvailable ? summarizeList(reasons) : undefined,
+      ruleState: {
+        stage: analysis.dayAnalysis.explain.stage,
+        entryAllowed: analysis.dayAnalysis.explain.entryAllowed,
+        reasons,
+        missingConditions,
+      },
+    },
   };
 };
 
@@ -94,17 +125,18 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
   const active = datasets.find((dataset) => dataset.symbol === symbol) ?? datasets[0];
   const internalCandidateAnalysis = Object.values(staticAnalysisBySymbol).flatMap((analysis) => analysis.candidateAnalysis);
   const importedSignalRows = active.importedSignals;
-  const screenedResults = internalCandidateAnalysis.map((analysis) => toScreenedRow(analysis, replyMode)).filter((row) => row.validity === 'pass');
+  const screenedResults = internalCandidateAnalysis.map((analysis) => toScreenedRow(analysis, replyMode));
   const bars = active.bars1m.length > 0 ? aggregateFrom1m(active.bars1m, timeframe) : [];
   const screenedDayChoices = screenedResults.filter((row) => row.symbol === active.symbol).map((row) => row.candidateDate);
   const fallbackImportedDates = importedSignalRows.map((row) => row.date);
   const allDayChoices = [...new Set(bars.map((bar) => dailyBucketKeyNy(bar.time)))];
+  const practiceDayChoices = [...new Set(screenedDayChoices)];
   const dayChoices = practiceOnly
-    ? screenedDayChoices.length
-      ? screenedDayChoices
+    ? practiceDayChoices.length
+      ? practiceDayChoices
       : fallbackImportedDates
     : allDayChoices.length
-      ? allDayChoices
+      ? [...new Set([...practiceDayChoices, ...allDayChoices])]
       : fallbackImportedDates;
   const selectedDayValue = selectedDay || dayChoices[0] || (bars.length > 0 ? dailyBucketKeyNy(bars[bars.length - 1].time) : '') || importedSignalRows[0]?.date || '';
 

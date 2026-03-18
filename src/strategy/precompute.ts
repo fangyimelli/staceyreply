@@ -38,13 +38,14 @@ export const buildStaticSymbolAnalysis = (
 const toDayChoices = (bars: OhlcvBar[], importedDates: string[], timeframe: Timeframe, practiceOnly: boolean, screenedDates: string[]): string[] => {
   const aggregatedBars = bars.length > 0 ? aggregateFrom1m(bars, timeframe) : [];
   const allDayChoices = [...new Set(aggregatedBars.map((bar) => dailyBucketKeyNy(bar.time)))];
+  const practiceDayChoices = [...new Set(screenedDates)];
 
   return practiceOnly
-    ? screenedDates.length
-      ? screenedDates
+    ? practiceDayChoices.length
+      ? practiceDayChoices
       : importedDates
     : allDayChoices.length
-      ? allDayChoices
+      ? [...new Set([...practiceDayChoices, ...allDayChoices])]
       : importedDates;
 };
 
