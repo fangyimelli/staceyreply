@@ -1,39 +1,34 @@
 import type { OhlcvBar, Timeframe } from '../types/domain';
-import { timeframeBucketKeyNy } from '../utils/nyDate';
+import { nyDate } from '../utils/nyDate';
 
-const key = (time: string, timeframe: Timeframe): string => {
-  if (timeframe === '1m') return time;
-  if (timeframe === '1D' || timeframe === '5m' || timeframe === '15m' || timeframe === '1h' || timeframe === '4h') {
-    return timeframeBucketKeyNy(time, timeframe);
+const minutesByTf: Record<Exclude<Timeframe, '1D'>, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
+
+const bucketStart = (time: string, minutes: number) => {
+  const ms = new Date(time).getTime();
+  return new Date(Math.floor(ms / (minutes * 60_000)) * minutes * 60_000).toISOString();
+};
+
+export const aggregateBars = (bars: OhlcvBar[], timeframe: Timeframe): OhlcvBar[] => {
+  if (timeframe === '1m') return bars;
+  const buckets = new Map<string, OhlcvBar[]>();
+  if (timeframe === '1D') {
+    for (const bar of bars) {
+      const key = nyDate(bar.time);
+      (buckets.get(key) ?? buckets.set(key, []).get(key)!).push(bar);
+    }
+  } else {
+    const minutes = minutesByTf[timeframe];
+    for (const bar of bars) {
+      const key = bucketStart(bar.time, minutes);
+      (buckets.get(key) ?? buckets.set(key, []).get(key)!).push(bar);
+    }
   }
-
-  return time;
-};
-
-export const aggregate = (bars: OhlcvBar[], tf: Timeframe): OhlcvBar[] => {
-  if (tf === '1m') return bars;
-  const g = new Map<string, OhlcvBar[]>();
-  bars.forEach((b) => {
-    const k = key(b.time, tf);
-    const v = g.get(k) ?? [];
-    v.push(b);
-    g.set(k, v);
-  });
-  return [...g.entries()].map(([, v]) => ({ time: v[0].time, open: v[0].open, high: Math.max(...v.map((x) => x.high)), low: Math.min(...v.map((x) => x.low)), close: v[v.length-1].close, volume: v.reduce((s, x) => s + x.volume, 0) }));
-};
-
-export const ema20 = (bars: OhlcvBar[]): number[] => {
-  const k = 2 / 21; const out: number[] = [];
-  bars.forEach((b, i) => out.push(i === 0 ? b.close : b.close * k + out[i-1] * (1-k)));
-  return out;
-};
-
-
-export const aggregateFrom1m = aggregate;
-export const ema = (bars: OhlcvBar[], period = 20): number[] => {
-  if (period === 20) return ema20(bars);
-  const k = 2 / (period + 1);
-  const out: number[] = [];
-  bars.forEach((b, i) => out.push(i === 0 ? b.close : b.close * k + out[i - 1] * (1 - k)));
-  return out;
+  return [...buckets.values()].map((group) => ({
+    time: group[0].time,
+    open: group[0].open,
+    high: Math.max(...group.map((bar) => bar.high)),
+    low: Math.min(...group.map((bar) => bar.low)),
+    close: group[group.length - 1].close,
+    volume: group.reduce((sum, bar) => sum + bar.volume, 0),
+  }));
 };

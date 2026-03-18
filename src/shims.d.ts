@@ -37,3 +37,7 @@ declare module 'recharts' {
   export const XAxis: any;
   export const YAxis: any;
 }
+
+interface ImportMeta {
+  glob(pattern: string, options?: Record<string, unknown>): Record<string, unknown>;
+}

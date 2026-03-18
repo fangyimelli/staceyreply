@@ -1,19 +1,18 @@
-export type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1D";
-export type StrategyLine = "FGD" | "FRD";
-export type ReplyMode = "auto" | "manual";
-export type AnnotationKind =
-  | "source"
-  | "stopHunt"
-  | "point1"
-  | "point2"
-  | "point3"
-  | "emaConfirm"
-  | "entry"
-  | "stop"
-  | "tp30"
-  | "tp35"
-  | "tp40"
-  | "tp50";
+export type Timeframe = '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
+export type TemplateType = 'FGD' | 'FRD' | 'INVALID' | 'INCOMPLETE';
+export type ReplayMode = 'pause' | 'auto' | 'semi';
+export type ReplayStageId =
+  | 'background'
+  | 'signal'
+  | 'trade-day'
+  | 'source'
+  | 'stop-hunt'
+  | 'pattern-123'
+  | 'ema'
+  | 'entry'
+  | 'management'
+  | 'complete'
+  | 'invalid';
 
 export interface OhlcvBar {
   time: string;
@@ -24,244 +23,111 @@ export interface OhlcvBar {
   volume: number;
 }
 
-export interface DayLevelStats {
-  previousClose?: number;
-  hod: number;
-  lod: number;
-  hos: number;
-  los: number;
+export interface DatasetFile {
+  id: string;
+  label: string;
+  path: string;
+  kind: 'csv' | 'json';
+  raw: string;
+  isSample?: boolean;
 }
 
-export interface StrategyPreprocessingContext {
-  bars1m: OhlcvBar[];
-  barsByNyDate: Record<string, OhlcvBar[]>;
-  dailyBars: OhlcvBar[];
-  dailyStatsByNyDate: Record<string, DayLevelStats>;
-  timeToIndex: Record<string, number>;
-}
-export interface CandidateDate {
-  symbol: string;
-  date: string;
-  type: StrategyLine;
-  reason: string;
-}
-
-export interface ImportedSignalRow {
-  pair: string;
-  date: string;
-  signal: StrategyLine;
-  status?: "pass" | "fail" | "backend" | "candidate";
-  notes?: string;
-}
-
-export interface SymbolDataset {
+export interface ParsedDataset {
+  datasetId: string;
   symbol: string;
   bars1m: OhlcvBar[];
-  importedSignals: ImportedSignalRow[];
-  dataSource: "backend-api" | "sample-mode";
-  bars1mStatus: "replayable-real" | "sample-synthetic" | "metadata-only";
-  timezone: "America/New_York";
+  sourceLabel: string;
+  isSample: boolean;
 }
 
-// Internal analysis structures (strategy / replay pipeline).
-export interface TargetAssessment {
-  tier: 30 | 35 | 40 | 50;
-  reached: boolean;
-  missing: string[];
-  description: string;
-  targetPrice: number;
-}
-
-export interface InternalExplainState {
-  template: "FGD" | "FRD" | "NONE";
-  bias: "LONG" | "SHORT" | "NEUTRAL";
-  stage: string;
-  missingConditions: string[];
-  reasons: string[];
-  evidenceDetails: string[];
-  entryAllowed: boolean;
-  targetTier: 30 | 35 | 40 | 50 | null;
-  targetAssessments: TargetAssessment[];
-  ruleTrace: RuleTraceItem[];
-  intraday?: IntradayRuleSummary;
+export interface DatasetValidationIssue {
+  code:
+    | 'missing-pump-context'
+    | 'missing-dump-context'
+    | 'missing-signal-day'
+    | 'insufficient-intraday'
+    | 'previous-close-unavailable'
+    | 'timeframe-discontinuity'
+    | 'template-unverifiable'
+    | 'invalid-format';
+  message: string;
+  detail: string;
 }
 
 export interface RuleTraceItem {
-  ruleId: string;
+  ruleName: string;
+  timeframe: Timeframe | 'session';
   passed: boolean;
-  detail: string;
+  reason: string;
   prices: Record<string, number>;
   times: Record<string, string>;
 }
 
-export interface IntradayPivotPoint {
-  barTime: string;
-  price: number;
-}
-
-export interface IntradayRuleSummary {
-  source?: IntradayPivotPoint;
-  stop?: IntradayPivotPoint;
-  stopHunt?: {
-    sweptLevel: IntradayPivotPoint;
-    reclaim: IntradayPivotPoint;
-  };
-  pattern123?: {
-    node1?: IntradayPivotPoint;
-    node2?: IntradayPivotPoint;
-    node3?: IntradayPivotPoint;
-    breakout?: IntradayPivotPoint;
-  };
-  emaConfirm?: IntradayPivotPoint;
-  move30Pips: number;
-  rotationTagged: boolean;
-  engulfment: boolean;
-}
-
-export interface InternalAnnotation {
+export interface EventLogItem {
   id: string;
-  kind: AnnotationKind;
+  stage: ReplayStageId;
+  title: string;
+  summary: string;
+  detail: string;
+  statusBanner: string;
+  visibleFromIndex: number;
+  barTime?: string;
+  prices?: Record<string, number>;
+  trace: RuleTraceItem[];
+}
+
+export interface Annotation {
+  id: string;
+  kind: 'source' | 'stopHunt' | 'point1' | 'point2' | 'point3' | 'ema' | 'entry' | 'stop' | 'tp30' | 'tp35' | 'tp40' | 'tp50' | 'marker';
   barTime: string;
   price: number;
-  ruleId?: string;
-  ruleName: string;
+  label: string;
   reasoning: string;
-  tracePrices?: Record<string, number>;
-  traceTimes?: Record<string, string>;
+  trace: RuleTraceItem[];
+  visibleFromIndex: number;
 }
 
-export interface InternalTrade {
-  side: "LONG" | "SHORT";
-  entry: number;
-  exit: number;
-  pnlPips: number;
-  mode?: ReplyMode;
+export interface TradeLevel {
+  tier: 30 | 35 | 40 | 50;
+  price: number;
+  hit: boolean;
+  reason: string;
 }
 
-export interface InternalDayAnalysis {
-  explain: InternalExplainState;
-  annotations: InternalAnnotation[];
+export interface ReplayAnalysis {
+  datasetId: string;
+  symbol: string;
+  timeframeBars: Record<Timeframe, OhlcvBar[]>;
+  template: TemplateType;
+  bias: 'bullish' | 'bearish' | 'neutral';
+  quality: 'strong' | 'acceptable' | 'weak' | 'invalid';
+  selectedTradeDay: string;
+  stage: ReplayStageId;
+  canEnter: boolean;
+  statusBanner: string;
+  invalidReasons: string[];
+  missingConditions: string[];
+  currentReasoning: string[];
+  nextExpectation: string;
+  eventLog: EventLogItem[];
+  ruleTrace: RuleTraceItem[];
+  annotations: Annotation[];
+  currentBarIndex: number;
+  replayStartIndex: number;
+  replayEndIndex: number;
+  stopPrice?: number;
+  entryPrice?: number;
+  sourcePrice?: number;
   previousClose?: number;
   hos?: number;
   los?: number;
   hod?: number;
   lod?: number;
-  trade?: InternalTrade;
-}
-
-export interface InternalCandidateAnalysis {
-  symbol: string;
-  candidate: CandidateDate;
-  dayAnalysis: InternalDayAnalysis;
-}
-
-// Final frontend-screened payload structures.
-export interface ScreenedResultRow {
-  symbol: string;
-  candidateDate: string;
-  lineType: StrategyLine;
-  validity: "pass" | "fail" | "pending";
-  replayAvailable: boolean;
-  recommendedNextAction: string;
-  currentTargetTier: 30 | 35 | 40 | 50 | null;
-  failReasonSummary?: string;
-  missingConditionsSummary?: string;
-  debug?: ScreenedResultDebugPayload;
-}
-export interface ScreenedResultDebugPayload {
-  scanReason: string;
-  rejectionReason?: string;
-  ruleState?: {
-    stage: string;
-    entryAllowed: boolean;
-    reasons: string[];
-    missingConditions: string[];
+  targetLevels: TradeLevel[];
+  recommendedTarget?: 30 | 35 | 40 | 50;
+  lastReplyEval: {
+    stage: ReplayStageId;
+    canReply: boolean;
+    explanation: string;
   };
 }
-export interface DebugArtifacts {
-  rawScanTraces: CandidateDate[];
-  rejectedDates: Array<{
-    symbol: string;
-    candidateDate: string;
-    lineType: StrategyLine;
-    reason: string;
-  }>;
-  internalRuleStates: Array<{
-    symbol: string;
-    candidateDate: string;
-    lineType: StrategyLine;
-    stage: string;
-    entryAllowed: boolean;
-    reasons: string[];
-    missingConditions: string[];
-  }>;
-}
-
-
-export interface StaticSymbolAnalysis {
-  symbol: string;
-  context: StrategyPreprocessingContext;
-  candidates: CandidateDate[];
-  candidateAnalysis: InternalCandidateAnalysis[];
-}
-
-export interface ReplaySnapshot {
-  currentBarIndex: number;
-  dayAnalysis: InternalDayAnalysis;
-  revealedBars: OhlcvBar[];
-  revealedEma20: number[];
-}
-
-export interface ReplayDayAnalysis {
-  key: string;
-  symbol: string;
-  day: string;
-  line: StrategyLine;
-  replyMode: ReplyMode;
-  replayStartIndex: number;
-  replayEndIndex: number;
-  replayScopeLabel: string;
-  fullDayBars: OhlcvBar[];
-  snapshots: ReplaySnapshot[];
-}
-
-export interface ReplayState {
-  isPlaying: boolean;
-  isFinished: boolean;
-  currentBarIndex: number;
-  playSpeed: number;
-  replayStartIndex: number;
-  replayEndIndex: number;
-}
-
-export interface FrontendScreenedPayload {
-  importedSignalRows: ImportedSignalRow[];
-  screenedResults: ScreenedResultRow[];
-  activeSymbol: string;
-  bars: OhlcvBar[];
-  dayChoices: string[];
-  selectedDay: string;
-  fullDayBars: OhlcvBar[];
-  revealedBars: OhlcvBar[];
-  revealedEma20: number[];
-  dayAnalysis: InternalDayAnalysis;
-  replayDefaults: {
-    replayStartIndex: number;
-    replayEndIndex: number;
-  };
-  replayMeta: {
-    currentBarIndex: number;
-    scopeLabel: string;
-  };
-}
-
-// Debug-only payload structures.
-export interface DebugPayload {
-  candidatesBySymbol: Record<string, CandidateDate[]>;
-  internalCandidateAnalysis: InternalCandidateAnalysis[];
-}
-
-// Backwards-compatible aliases used by existing UI components.
-export type Annotation = InternalAnnotation;
-export type ExplainState = InternalExplainState;
-export type Trade = InternalTrade;
