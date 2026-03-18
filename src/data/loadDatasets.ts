@@ -14,6 +14,9 @@ export interface BackendDatasetRecord {
     source: 'backend-api' | 'sample-mode';
     timezone: 'America/New_York';
     signals: BackendSignalWindow[];
+    bars1mStatus: 'replayable-real' | 'sample-synthetic' | 'metadata-only';
+    importedFields: string[];
+    derivedFields: string[];
   };
 }
 
@@ -62,12 +65,17 @@ const normalizeResponse = (payload: unknown): BackendDatasetsResponse => {
           source?: unknown;
           timezone?: unknown;
           signals?: unknown;
+          bars1mStatus?: unknown;
+          importedFields?: unknown;
+          derivedFields?: unknown;
         };
       };
 
-      if (typeof entry.pair !== 'string' || !Array.isArray(entry.bars1m) || !entry.bars1m.every(isOhlcvBar)) {
-        throw new Error(`Dataset ${index} is missing pair or bars1m.`);
+      if (typeof entry.pair !== 'string') {
+        throw new Error(`Dataset ${index} is missing pair.`);
       }
+
+      const normalizedBars = Array.isArray(entry.bars1m) && entry.bars1m.every(isOhlcvBar) ? entry.bars1m : [];
 
       const rawSignals = Array.isArray(entry.metadata?.signals) ? entry.metadata?.signals : [];
       const signals = rawSignals.filter(
@@ -81,11 +89,25 @@ const normalizeResponse = (payload: unknown): BackendDatasetsResponse => {
 
       return {
         pair: entry.pair,
-        bars1m: entry.bars1m,
+        bars1m: normalizedBars,
         metadata: {
           source: entry.metadata?.source === 'backend-api' ? 'backend-api' : 'sample-mode',
           timezone: entry.metadata?.timezone === 'America/New_York' ? 'America/New_York' : 'America/New_York',
           signals,
+          bars1mStatus:
+            entry.metadata?.bars1mStatus === 'replayable-real'
+              ? 'replayable-real'
+              : entry.metadata?.bars1mStatus === 'metadata-only'
+                ? 'metadata-only'
+                : normalizedBars.length
+                  ? 'sample-synthetic'
+                  : 'metadata-only',
+          importedFields: Array.isArray(entry.metadata?.importedFields)
+            ? entry.metadata.importedFields.filter((field): field is string => typeof field === 'string')
+            : ['pair', 'date', 'signal'],
+          derivedFields: Array.isArray(entry.metadata?.derivedFields)
+            ? entry.metadata.derivedFields.filter((field): field is string => typeof field === 'string')
+            : ['candidate classification', 'rule-traceable analysis'],
         },
       } satisfies BackendDatasetRecord;
     }),
@@ -102,6 +124,9 @@ export const buildSampleDatasetsResponse = (): BackendDatasetsResponse => ({
         source: 'sample-mode',
         timezone: 'America/New_York',
         signals: [],
+        bars1mStatus: 'sample-synthetic',
+        importedFields: ['sample 1m OHLCV bars'],
+        derivedFields: ['candidate classification', 'replay analysis'],
       },
     },
   ],
@@ -111,7 +136,16 @@ export const buildSampleDatasetsResponse = (): BackendDatasetsResponse => ({
 export const toSymbolDatasets = (response: BackendDatasetsResponse): SymbolDataset[] =>
   response.datasets.map((dataset) => ({
     symbol: dataset.pair,
-    bars1m: dataset.bars1m,
+    bars1m: dataset.metadata.bars1mStatus === 'replayable-real' || dataset.metadata.bars1mStatus === 'sample-synthetic' ? dataset.bars1m : [],
+    importedSignals: dataset.metadata.signals.map((signal) => ({
+      pair: signal.pair,
+      date: signal.date,
+      signal: signal.signal,
+      status: 'backend',
+    })),
+    dataSource: dataset.metadata.source,
+    bars1mStatus: dataset.metadata.bars1mStatus,
+    timezone: dataset.metadata.timezone,
   }));
 
 export const loadDatasets = async (): Promise<BackendDatasetsResponse> => {
