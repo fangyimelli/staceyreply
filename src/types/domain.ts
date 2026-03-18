@@ -51,11 +51,16 @@ export interface ImportedSignalRow {
   date: string;
   signal: StrategyLine;
   status?: "pass" | "fail" | "backend" | "candidate";
+  notes?: string;
 }
 
 export interface SymbolDataset {
   symbol: string;
   bars1m: OhlcvBar[];
+  importedSignals: ImportedSignalRow[];
+  dataSource: "backend-api" | "sample-mode";
+  bars1mStatus: "replayable-real" | "sample-synthetic" | "metadata-only";
+  timezone: "America/New_York";
 }
 
 // Internal analysis structures (strategy / replay pipeline).
