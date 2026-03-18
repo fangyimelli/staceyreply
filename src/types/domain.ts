@@ -23,6 +23,22 @@ export interface OhlcvBar {
   close: number;
   volume: number;
 }
+
+export interface DayLevelStats {
+  previousClose?: number;
+  hod: number;
+  lod: number;
+  hos: number;
+  los: number;
+}
+
+export interface StrategyPreprocessingContext {
+  bars1m: OhlcvBar[];
+  barsByNyDate: Record<string, OhlcvBar[]>;
+  dailyBars: OhlcvBar[];
+  dailyStatsByNyDate: Record<string, DayLevelStats>;
+  timeToIndex: Record<string, number>;
+}
 export interface CandidateDate {
   symbol: string;
   date: string;

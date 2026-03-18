@@ -1,4 +1,3 @@
-import { aggregateFrom1m } from "../aggregation/timeframe";
 import { Candle, StrategyMarker, StrategyResult } from "../types";
 import { evaluateIntradayPatterns } from "./intraday";
 import type {
@@ -7,6 +6,7 @@ import type {
   OhlcvBar,
   ReplyMode,
   RuleTraceItem,
+  StrategyPreprocessingContext,
   StrategyLine,
 } from "../types/domain";
 
@@ -118,16 +118,21 @@ const formatLabel = (ruleId: string): string =>
 const findTrace = (ruleTrace: RuleTraceItem[], ruleId: string): RuleTraceItem | undefined =>
   ruleTrace.find((item) => item.ruleId === ruleId);
 
-const aggregateDailyNy = (bars1m: OhlcvBar[]): OhlcvBar[] => {
-  const grouped = new Map<string, OhlcvBar[]>();
-  bars1m.forEach((bar) => {
+export const buildStrategyPreprocessingContext = (
+  bars1m: OhlcvBar[],
+): StrategyPreprocessingContext => {
+  const barsByNyDateMap = new Map<string, OhlcvBar[]>();
+  const timeToIndex: Record<string, number> = {};
+
+  bars1m.forEach((bar, index) => {
     const key = dailyBucketKeyNy(bar.time);
-    const bucket = grouped.get(key) ?? [];
+    const bucket = barsByNyDateMap.get(key) ?? [];
     bucket.push(bar);
-    grouped.set(key, bucket);
+    barsByNyDateMap.set(key, bucket);
+    timeToIndex[bar.time] = index;
   });
 
-  return [...grouped.entries()]
+  const dailyBars = [...barsByNyDateMap.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, bars]) => ({
       time: bars[0].time,
@@ -137,12 +142,36 @@ const aggregateDailyNy = (bars1m: OhlcvBar[]): OhlcvBar[] => {
       close: bars[bars.length - 1].close,
       volume: bars.reduce((sum, bar) => sum + bar.volume, 0),
     }));
+
+  const dailyStatsByNyDate = dailyBars.reduce<
+    StrategyPreprocessingContext["dailyStatsByNyDate"]
+  >((acc, dailyBar, index) => {
+    const day = dailyBucketKeyNy(dailyBar.time);
+    const dayBars = barsByNyDateMap.get(day) ?? [];
+    if (dayBars.length === 0) return acc;
+    acc[day] = {
+      previousClose: index > 0 ? dailyBars[index - 1].close : undefined,
+      hod: Math.max(...dayBars.map((bar) => bar.high)),
+      lod: Math.min(...dayBars.map((bar) => bar.low)),
+      hos: Math.max(...dayBars.map((bar) => bar.open)),
+      los: Math.min(...dayBars.map((bar) => bar.open)),
+    };
+    return acc;
+  }, {});
+
+  return {
+    bars1m,
+    barsByNyDate: Object.fromEntries(barsByNyDateMap),
+    dailyBars,
+    dailyStatsByNyDate,
+    timeToIndex,
+  };
 };
 
 export function evaluateDailyTemplate(params: {
   line: StrategyLine;
-  bars1m: OhlcvBar[];
   selectedDay: string;
+  context: StrategyPreprocessingContext;
   pipPrecision?: number;
   symbol?: string;
 }): {
@@ -153,8 +182,8 @@ export function evaluateDailyTemplate(params: {
   evidenceDetails: string[];
   ruleTrace: RuleTraceItem[];
 } {
-  const { line, bars1m, selectedDay, symbol } = params;
-  const dailyBars = aggregateDailyNy(bars1m);
+  const { line, context, selectedDay, symbol } = params;
+  const { bars1m, dailyBars } = context;
   const idxD0 = dailyBars.findIndex(
     (bar) => dailyBucketKeyNy(bar.time) === selectedDay,
   );
@@ -552,31 +581,32 @@ export const toNyLabel = (time: string): string =>
 
 export const detectCandidates = (
   symbol: string,
-  bars1m: OhlcvBar[],
+  context: StrategyPreprocessingContext,
 ): CandidateDate[] => {
-  const dailyBars = aggregateFrom1m(bars1m, "1D");
+  const { dailyBars } = context;
 
   return dailyBars.map((bar) => {
     const type: StrategyLine =
       Math.abs(bar.close - bar.open) > 0.001 ? "FGD" : "FRD";
     return {
       symbol,
-      date: bar.time.slice(0, 10),
+      date: dailyBucketKeyNy(bar.time),
       type,
-      reason: `Detected from daily bar ${bar.time.slice(0, 10)}`,
+      reason: `Detected from daily bar ${dailyBucketKeyNy(bar.time)}`,
     };
   });
 };
 
 export const evaluateDay = (
   line: StrategyLine,
-  bars1m: OhlcvBar[],
   day: string,
   replyMode: ReplyMode,
   manualTrade: { entry: number; exit: number },
+  context: StrategyPreprocessingContext,
   symbol?: string,
 ): InternalDayAnalysis => {
-  const dayBars = bars1m.filter((bar) => dailyBucketKeyNy(bar.time) === day);
+  const { bars1m, barsByNyDate, dailyStatsByNyDate, timeToIndex } = context;
+  const dayBars = barsByNyDate[day] ?? [];
   const first = dayBars[0];
   const last = dayBars[dayBars.length - 1];
 
@@ -611,25 +641,26 @@ export const evaluateDay = (
   const pipConfig = inferPipConfig(symbol, dayBars);
   const dailyTemplate = evaluateDailyTemplate({
     line,
-    bars1m,
     selectedDay: day,
+    context,
     symbol,
   });
-
-  const previousBars = bars1m.filter((bar) => bar.time < first.time);
-  const previousClose = previousBars[previousBars.length - 1]?.close;
-  const hod = Math.max(...dayBars.map((bar) => bar.high));
-  const lod = Math.min(...dayBars.map((bar) => bar.low));
-  const hos = Math.max(...dayBars.map((bar) => bar.open));
-  const los = Math.min(...dayBars.map((bar) => bar.open));
+  const dayStats = dailyStatsByNyDate[day];
+  const firstIndex = timeToIndex[first.time];
+  const previousClose =
+    dayStats?.previousClose ?? (firstIndex > 0 ? bars1m[firstIndex - 1]?.close : undefined);
+  const hod = dayStats?.hod ?? Math.max(...dayBars.map((bar) => bar.high));
+  const lod = dayStats?.lod ?? Math.min(...dayBars.map((bar) => bar.low));
+  const hos = dayStats?.hos ?? Math.max(...dayBars.map((bar) => bar.open));
+  const los = dayStats?.los ?? Math.min(...dayBars.map((bar) => bar.open));
 
   const intraday = evaluateIntradayPatterns({ line, dayBars, pipPrecision: 4 });
   const dayEma20 = ema(dayBars.map((bar) => bar.close), 20);
   const emaConfirmIndex = dayBars.findIndex((bar, index) => {
     const pivotIndex = intraday.pattern123?.breakout
-      ? dayBars.findIndex((candidate) => candidate.time === intraday.pattern123?.breakout?.barTime)
+      ? (timeToIndex[intraday.pattern123?.breakout?.barTime ?? ""] ?? -1) - firstIndex
       : intraday.source
-        ? dayBars.findIndex((candidate) => candidate.time === intraday.source?.barTime)
+        ? (timeToIndex[intraday.source?.barTime ?? ""] ?? -1) - firstIndex
         : -1;
     if (pivotIndex >= 0 && index < pivotIndex) return false;
     const emaValue = dayEma20[index];
