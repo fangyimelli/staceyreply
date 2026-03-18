@@ -23,6 +23,7 @@ Local single-page app for Day 3 practice / reply workflow. The current productio
 - Explain panel shows template classification, bias, stage, missing conditions, can-enter / cannot-enter reasons, and per-rule pass/fail evidence.
 - Pip-aware scoring now converts prices by symbol/decimals, blocks entries when stop distance exceeds 20 pips, and grades fixed TP30/35/40/50 targets with missing-condition feedback.
 - Local sample mode, local CSV/JSON upload, and acceptance-checklist-oriented workflow remain supported.
+- Replay controls now use an independent UI state (`isPlaying`, `isFinished`, `currentBarIndex`, `playSpeed`, `replayStartIndex`, `replayEndIndex`) and reveal Day 3 bars progressively to the chart/explain panels.
 
 ---
 
@@ -153,6 +154,11 @@ Replay implementation should remain layered and explicit:
 - annotations with checkpoint-aware rendering
 - explain panel consuming replay state (no ad hoc UI-only recomputation)
 
+### Replay start scope
+- Confirmed replay scope: **play Day 3 from the selected New York day's first intraday bar to that same day's last intraday bar**.
+- The current implementation does **not** start replay from D-1; prior bars are kept only as historical context for strategy evaluation.
+- Chart and explain panels only consume the progressively revealed Day 3 bars while replay advances.
+
 ### Replay debugging: incorrect state transitions
 When state transitions look wrong:
 1. Confirm replay cursor index and visible-bar window are aligned.
@@ -260,5 +266,5 @@ The current chart component renders:
 ## Notes on current implementation scope
 
 - The shipped UI is the React entry described above.
-- This README intentionally does **not** claim replay controls, TradingView-style bar stepping, or candlestick rendering because those behaviors are not currently wired into the active UI.
+- This README intentionally does **not** claim any replay behavior beyond the currently implemented Day 3 controls and revealed-bar progression documented above.
 - Use the confirmed-features list above as the source of truth for what is actually implemented right now.

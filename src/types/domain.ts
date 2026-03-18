@@ -166,15 +166,33 @@ export interface DebugArtifacts {
   }>;
 }
 
+export interface ReplayState {
+  isPlaying: boolean;
+  isFinished: boolean;
+  currentBarIndex: number;
+  playSpeed: number;
+  replayStartIndex: number;
+  replayEndIndex: number;
+}
+
 export interface FrontendScreenedPayload {
   screenedResults: ScreenedResultRow[];
   activeSymbol: string;
   bars: OhlcvBar[];
   dayChoices: string[];
   selectedDay: string;
-  dayBars: OhlcvBar[];
-  ema20: number[];
+  fullDayBars: OhlcvBar[];
+  revealedBars: OhlcvBar[];
+  revealedEma20: number[];
   dayAnalysis: InternalDayAnalysis;
+  replayDefaults: {
+    replayStartIndex: number;
+    replayEndIndex: number;
+  };
+  replayMeta: {
+    currentBarIndex: number;
+    scopeLabel: string;
+  };
 }
 
 // Debug-only payload structures.

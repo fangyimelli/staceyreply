@@ -4,6 +4,7 @@ import type {
   DebugPayload,
   FrontendScreenedPayload,
   InternalCandidateAnalysis,
+  OhlcvBar,
   ReplyMode,
   ScreenedResultRow,
   StrategyLine,
@@ -21,6 +22,7 @@ interface FormatterConfig {
   practiceOnly: boolean;
   selectedDate?: string;
   manualTrade: { entry: number; exit: number };
+  replayWindow?: { currentBarIndex: number; replayStartIndex: number; replayEndIndex: number };
 }
 
 const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode): ScreenedResultRow => {
@@ -40,8 +42,25 @@ const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode
   };
 };
 
+const buildReplayPayload = (dayBars: OhlcvBar[], replayWindow?: FormatterConfig['replayWindow']) => {
+  const replayStartIndex = 0;
+  const replayEndIndex = Math.max(dayBars.length - 1, 0);
+  const requestedIndex = replayWindow?.currentBarIndex ?? replayStartIndex;
+  const boundedIndex = Math.min(Math.max(requestedIndex, replayStartIndex), replayEndIndex);
+  const currentBarIndex = dayBars.length ? boundedIndex : 0;
+  const revealedBars = dayBars.length ? dayBars.slice(0, currentBarIndex + 1) : [];
+
+  return {
+    replayStartIndex,
+    replayEndIndex,
+    currentBarIndex,
+    revealedBars,
+    replayScopeLabel: 'Day 3 replay starts from the selected NY day\'s first intraday bar and ends at that day\'s last intraday bar.',
+  };
+};
+
 export const formatFrontendScreenedPayload = (config: FormatterConfig): { payload: FrontendScreenedPayload; debug: DebugPayload } => {
-  const { datasets, lineFilter, replyMode, symbol, timeframe, line, practiceOnly, selectedDate, manualTrade } = config;
+  const { datasets, lineFilter, replyMode, symbol, timeframe, line, practiceOnly, selectedDate, manualTrade, replayWindow } = config;
 
   const internalCandidateAnalysis = datasets.flatMap((dataset) => {
     const candidates = detectCandidates(dataset.symbol, dataset.bars1m).filter(
@@ -65,8 +84,10 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
   const dayChoices = practiceOnly ? screenedDayChoices : allDayChoices;
   const selectedDayValue = selectedDate || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10);
 
-  const dayAnalysis = evaluateDay(line, active.bars1m, selectedDayValue, replyMode, manualTrade, active.symbol);
-  const dayBars = bars.filter((bar) => bar.time.slice(0, 10) === selectedDayValue);
+  const fullDayBars = bars.filter((bar) => bar.time.slice(0, 10) === selectedDayValue);
+  const replayPayload = buildReplayPayload(fullDayBars, replayWindow);
+  const revealedDayBars1m = active.bars1m.filter((bar) => bar.time <= (replayPayload.revealedBars[replayPayload.revealedBars.length - 1]?.time ?? ''));
+  const dayAnalysis = evaluateDay(line, revealedDayBars1m, selectedDayValue, replyMode, manualTrade, active.symbol);
 
   return {
     payload: {
@@ -75,9 +96,18 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
       bars,
       dayChoices,
       selectedDay: selectedDayValue,
-      dayBars,
-      ema20: ema(dayBars, 20),
+      fullDayBars,
+      revealedBars: replayPayload.revealedBars,
+      revealedEma20: ema(replayPayload.revealedBars, 20),
       dayAnalysis,
+      replayDefaults: {
+        replayStartIndex: replayPayload.replayStartIndex,
+        replayEndIndex: replayPayload.replayEndIndex,
+      },
+      replayMeta: {
+        currentBarIndex: replayPayload.currentBarIndex,
+        scopeLabel: replayPayload.replayScopeLabel,
+      },
     },
     debug: {
       candidatesBySymbol: Object.fromEntries(datasets.map((dataset) => [dataset.symbol, detectCandidates(dataset.symbol, dataset.bars1m)])),
