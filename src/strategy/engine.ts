@@ -116,6 +116,19 @@ const formatLabel = (ruleId: string): string =>
 const findTrace = (ruleTrace: RuleTraceItem[], ruleId: string): RuleTraceItem | undefined =>
   ruleTrace.find((item) => item.ruleId === ruleId);
 
+const summarizeCandidateRule = (
+  template: ReturnType<typeof evaluateDailyTemplate>,
+  ruleIds: string[],
+): string =>
+  ruleIds
+    .map((ruleId) => {
+      const trace = findTrace(template.ruleTrace, ruleId);
+      if (!trace) return undefined;
+      return `${formatLabel(ruleId)}: ${trace.passed ? "pass" : "fail"} (${trace.detail})`;
+    })
+    .filter((value): value is string => Boolean(value))
+    .join(" | ");
+
 export const buildStrategyPreprocessingContext = (
   bars1m: OhlcvBar[],
 ): StrategyPreprocessingContext => {
@@ -582,17 +595,55 @@ export const detectCandidates = (
   context: StrategyPreprocessingContext,
 ): CandidateDate[] => {
   const { dailyBars } = context;
+  const candidates: CandidateDate[] = [];
 
-  return dailyBars.map((bar) => {
-    const type: StrategyLine =
-      Math.abs(bar.close - bar.open) > 0.001 ? "FGD" : "FRD";
-    return {
+  dailyBars.forEach((bar, index) => {
+    if (index < 2) return;
+
+    const date = dailyBucketKeyNy(bar.time);
+    const fgdTemplate = evaluateDailyTemplate({
+      line: "FGD",
+      selectedDay: date,
+      context,
       symbol,
-      date: dailyBucketKeyNy(bar.time),
-      type,
-      reason: `Detected from daily bar ${dailyBucketKeyNy(bar.time)}`,
-    };
+    });
+    const frdTemplate = evaluateDailyTemplate({
+      line: "FRD",
+      selectedDay: date,
+      context,
+      symbol,
+    });
+
+    if (fgdTemplate.entryAllowed) {
+      candidates.push({
+        symbol,
+        date,
+        type: "FGD",
+        reason: summarizeCandidateRule(fgdTemplate, [
+          "daily-history-available",
+          "fgd-d2-dump",
+          "fgd-d1-close-red-to-green",
+          "fgd-priority-d1-body",
+        ]),
+      });
+    }
+
+    if (frdTemplate.entryAllowed) {
+      candidates.push({
+        symbol,
+        date,
+        type: "FRD",
+        reason: summarizeCandidateRule(frdTemplate, [
+          "daily-history-available",
+          "frd-d2-pump",
+          "frd-d1-close-black",
+          "frd-inside-day",
+        ]),
+      });
+    }
   });
+
+  return candidates;
 };
 
 export const evaluateDay = (
