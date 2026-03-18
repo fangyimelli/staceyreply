@@ -265,7 +265,7 @@ export default function App() {
           <h3>原始匯入 metadata</h3>
           <p style={{ marginTop: 0, color: '#475569' }}>這裡只列出後台匯入的 pair/date/signal 摘要，不代表完整 intraday chart 已可用。</p>
           {importedSignalRows.length === 0 ? (
-            <p>No imported candidate rows found for this symbol.</p>
+            <p>No backend-imported candidate rows were provided for this symbol.</p>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>

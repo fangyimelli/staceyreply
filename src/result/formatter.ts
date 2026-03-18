@@ -3,7 +3,6 @@ import { dailyBucketKeyNy } from '../utils/nyDate';
 import type {
   DebugPayload,
   FrontendScreenedPayload,
-  ImportedSignalRow,
   InternalCandidateAnalysis,
   ReplayDayAnalysis,
   ReplyMode,
@@ -85,14 +84,6 @@ const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode
   };
 };
 
-const toImportedSignalRow = (analysis: InternalCandidateAnalysis): ImportedSignalRow => ({
-  pair: analysis.symbol,
-  date: analysis.candidate.date,
-  signal: analysis.candidate.type,
-  status: analysis.dayAnalysis.explain.entryAllowed ? 'pass' : 'fail',
-  notes: 'Derived candidate from frontend analysis over replayable 1m bars.',
-});
-
 const emptyDayAnalysis = emptyPayload().payload.dayAnalysis;
 
 export const formatFrontendScreenedPayload = (config: FormatterConfig): { payload: FrontendScreenedPayload; debug: DebugPayload } => {
@@ -101,11 +92,8 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
   if (datasets.length === 0) return emptyPayload();
 
   const active = datasets.find((dataset) => dataset.symbol === symbol) ?? datasets[0];
-  const activeStatic = staticAnalysisBySymbol[active.symbol];
   const internalCandidateAnalysis = Object.values(staticAnalysisBySymbol).flatMap((analysis) => analysis.candidateAnalysis);
-  const importedSignalRows = active.importedSignals.length
-    ? active.importedSignals
-    : (activeStatic?.candidateAnalysis ?? []).map((analysis) => toImportedSignalRow(analysis));
+  const importedSignalRows = active.importedSignals;
   const screenedResults = internalCandidateAnalysis.map((analysis) => toScreenedRow(analysis, replyMode)).filter((row) => row.validity === 'pass');
   const bars = active.bars1m.length > 0 ? aggregateFrom1m(active.bars1m, timeframe) : [];
   const screenedDayChoices = screenedResults.filter((row) => row.symbol === active.symbol).map((row) => row.candidateDate);
