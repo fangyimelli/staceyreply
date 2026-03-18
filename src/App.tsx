@@ -47,6 +47,7 @@ export default function App() {
 
   const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
+    if (activeDataset.parseStatus === 'error') return null;
     return buildReplayDatasetAnalysis(activeDataset.datasetId, activeDataset.symbol, activeDataset.bars1m);
   }, [activeDataset]);
 
@@ -86,6 +87,8 @@ export default function App() {
   }, [bars]);
   const visibleAnnotations = analysis?.visibleAnnotations ?? [];
 
+  const selectedDatasetLabel = datasets.find((item) => item.id === datasetId)?.label.replace(/\.(csv|json)$/i, '').toUpperCase() ?? 'UNKNOWN';
+
   if (!activeDataset || !analysis) {
     return <div className="app-shell">
       <header>
@@ -96,8 +99,12 @@ export default function App() {
         <label>Dataset<select value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.label.replace(/\.(csv|json)$/i, '').toUpperCase()}{dataset.isSample ? ' (sample mode)' : ''}</option>)}</select></label>
       </section>
       <section className="info-strip">
-        <div>{isDatasetLoading ? 'Loading dataset…' : 'No dataset available.'}</div>
+        <div>{isDatasetLoading ? 'Loading dataset…' : activeDataset?.parseStatus === 'error' ? 'Dataset parse failed.' : 'No dataset available.'}</div>
+        {!isDatasetLoading && activeDataset?.parseStatus === 'error' ? <div>Why unavailable: {activeDataset.parseErrors[0] ?? 'Unknown parse error.'}</div> : null}
       </section>
+      {!isDatasetLoading && activeDataset?.parseStatus === 'error' ? <section className="footer-grid">
+        <div><h3>Diagnostics</h3><ul><li>Dataset: {selectedDatasetLabel}</li><li>Dataset file: {activeDataset.sourceLabel}</li><li>Parse status: {activeDataset.parseStatus}</li><li>Failure reasons: {activeDataset.parseErrors.join(' | ')}</li><li>Accepted formats / notes: {activeDataset.parseDiagnostics.join(' | ') || 'none'}</li></ul></div>
+      </section> : null}
     </div>;
   }
 
@@ -127,6 +134,7 @@ export default function App() {
     </section>
     <section className="info-strip">
       <div>Dataset status: {isDatasetLoading ? 'loading' : 'ready'}</div>
+      <div>Parse status: {activeDataset.parseStatus}</div>
       <div>Trade day: {analysis.selectedTradeDay}</div>
       <div>Current stage: {analysis.stage}</div>
       <div>Can reply: {analysis.lastReplyEval.canReply ? 'Yes' : 'No'}</div>
@@ -138,7 +146,7 @@ export default function App() {
     </main>
     <section className="footer-grid">
       <div><h3>Target ladder</h3><ul>{analysis.targetLevels.map((level) => <li key={level.tier}>TP{level.tier}: {level.hit ? 'hit' : 'pending'} @ {level.price.toFixed(4)} — {level.reason}</li>)}</ul></div>
-      <div><h3>Diagnostics</h3><ul><li>Dataset file: {activeDataset.sourceLabel}</li><li>Bars loaded: {activeDataset.bars1m.length}</li><li>Replay range: {analysis.replayStartIndex} → {analysis.replayEndIndex}</li><li>Invalid messages: {analysis.invalidReasons.join(' | ') || 'none'}</li></ul></div>
+      <div><h3>Diagnostics</h3><ul><li>Dataset file: {activeDataset.sourceLabel}</li><li>Bars loaded: {activeDataset.bars1m.length}</li><li>Parse errors: {activeDataset.parseErrors.join(' | ') || 'none'}</li><li>Accepted formats / notes: {activeDataset.parseDiagnostics.join(' | ') || 'none'}</li><li>Replay range: {analysis.replayStartIndex} → {analysis.replayEndIndex}</li><li>Invalid messages: {analysis.invalidReasons.join(' | ') || 'none'}</li></ul></div>
     </section>
   </div>;
 }

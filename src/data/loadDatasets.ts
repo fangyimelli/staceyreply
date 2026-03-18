@@ -42,8 +42,15 @@ export const loadParsedDataset = async (manifest: DatasetManifestItem): Promise<
     });
   }
 
-  return parseDatasetFile({
-    ...manifest,
-    raw: await loadRaw(),
-  });
+  try {
+    return parseDatasetFile({
+      ...manifest,
+      raw: await loadRaw(),
+    });
+  } catch {
+    return parseDatasetFile({
+      ...manifest,
+      raw: '',
+    });
+  }
 };
