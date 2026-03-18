@@ -12,6 +12,46 @@ import type {
   Timeframe,
 } from '../types/domain';
 
+const emptyPayload = (): { payload: FrontendScreenedPayload; debug: DebugPayload } => ({
+  payload: {
+    screenedResults: [],
+    activeSymbol: '',
+    bars: [],
+    dayChoices: [],
+    selectedDay: '',
+    fullDayBars: [],
+    revealedBars: [],
+    revealedEma20: [],
+    dayAnalysis: {
+      explain: {
+        template: 'NONE',
+        bias: 'NEUTRAL',
+        stage: 'No dataset loaded',
+        missingConditions: ['Backend dataset response did not include any datasets.'],
+        reasons: ['No backend dataset available for analysis.'],
+        evidenceDetails: [],
+        entryAllowed: false,
+        targetTier: null,
+        targetAssessments: [],
+        ruleTrace: [],
+      },
+      annotations: [],
+    },
+    replayDefaults: {
+      replayStartIndex: 0,
+      replayEndIndex: 0,
+    },
+    replayMeta: {
+      currentBarIndex: 0,
+      scopeLabel: "Day 3 replay starts from the selected NY day's first intraday bar and ends at that day's last intraday bar.",
+    },
+  },
+  debug: {
+    candidatesBySymbol: {},
+    internalCandidateAnalysis: [],
+  },
+});
+
 interface FormatterConfig {
   datasets: SymbolDataset[];
   lineFilter: { enableFGD: boolean; enableFRD: boolean };
@@ -61,6 +101,8 @@ const buildReplayPayload = (dayBars: OhlcvBar[], replayWindow?: FormatterConfig[
 
 export const formatFrontendScreenedPayload = (config: FormatterConfig): { payload: FrontendScreenedPayload; debug: DebugPayload } => {
   const { datasets, lineFilter, replyMode, symbol, timeframe, line, practiceOnly, selectedDate, manualTrade, replayWindow } = config;
+
+  if (datasets.length === 0) return emptyPayload();
 
   const internalCandidateAnalysis = datasets.flatMap((dataset) => {
     const candidates = detectCandidates(dataset.symbol, dataset.bars1m).filter(

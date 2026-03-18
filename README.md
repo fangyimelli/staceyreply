@@ -22,7 +22,7 @@ Local single-page app for Day 3 practice / reply workflow. The current productio
 - Intraday evaluation now exposes: source, stop hunt, 123 node 1/2/3, 20EMA confirm, entry/stop, and fixed TP30/35/40/50 annotations with rule-traceable hover evidence.
 - Explain panel shows template classification, bias, stage, missing conditions, can-enter / cannot-enter reasons, and per-rule pass/fail evidence.
 - Pip-aware scoring now converts prices by symbol/decimals, blocks entries when stop distance exceeds 20 pips, and grades fixed TP30/35/40/50 targets with missing-condition feedback.
-- Local sample mode, local CSV/JSON upload, and acceptance-checklist-oriented workflow remain supported.
+- Backend/API-driven dataset loading, sample mode fallback, and acceptance-checklist-oriented workflow remain supported.
 - Replay controls now use an independent UI state (`isPlaying`, `isFinished`, `currentBarIndex`, `playSpeed`, `replayStartIndex`, `replayEndIndex`) and reveal Day 3 bars progressively to the chart/explain panels.
 
 ---
@@ -69,8 +69,9 @@ If you want a production build instead:
 
 ### 1) Load data
 
-- On first load, the app tries to load built-in sample data automatically.
-- To replace it, use the file input in the top control row and choose one or more `.csv` / `.json` files.
+- On first load, the app requests datasets from the backend endpoint `/api/datasets/day3` through `src/data/loadDatasets.ts`.
+- If that endpoint is unavailable during local development, the app falls back to in-memory sample mode so the UI remains runnable.
+- The UI no longer accepts direct `.csv` / `.json` file uploads from the browser.
 
 ## Debug Guide (Development)
 
@@ -80,7 +81,7 @@ If you want a production build instead:
 - Keep debugging focused on traceability: each exposed debug state should map back to a specific rule or pipeline stage.
 
 ### Internal analysis pipeline (for tracing)
-1. CSV parsing
+1. Backend data access
 2. Timeframe rebuild
 3. FRD/FGD screening
 4. Day-state classification
@@ -88,12 +89,18 @@ If you want a production build instead:
 6. Auto/Manual state preparation
 7. Final result packaging for UI
 
-Uploaded CSV/folder data runs through this pipeline first and is treated as the primary source for real analysis. Built-in sample datasets remain available for immediate demo use.
+Backend-provided datasets are treated as the primary source for analysis. Built-in sample mode remains available as a local fallback.
 
-### Expected CSV format
-- Header must include exactly: `time,open,high,low,close,volume`.
-- `time` should be parseable by JavaScript `Date` (ISO timestamp recommended).
-- Parser location: `src/parser/parseLocalData.ts`.
+### Backend dataset contract
+- Data access location: `src/data/loadDatasets.ts`.
+- Expected backend endpoint: `/api/datasets/day3`.
+- Expected response shape: `BackendDatasetsResponse` with `datasets[]`, where each dataset includes:
+  - `pair`
+  - `bars1m`
+  - `metadata.source`
+  - `metadata.timezone`
+  - `metadata.signals[]` entries with `pair`, `date`, and `signal`
+- UI-facing `SymbolDataset[]` values are derived from this response only after the backend payload is loaded and normalized.
 
 ### Timezone assumptions
 - Session window logic in strategy uses `America/New_York` conversion for `07:00` to `11:00` checks.
@@ -111,7 +118,7 @@ Uploaded CSV/folder data runs through this pipeline first and is treated as the 
 4. Aggregation location: `src/aggregation/timeframe.ts`.
 
 ### Where each logic layer lives
-- Parser logic: `src/parser/parseLocalData.ts`
+- Data access / backend normalization: `src/data/loadDatasets.ts`
 - Aggregation logic: `src/aggregation/timeframe.ts`
 - Strategy engine logic: `src/strategy/engine.ts`
 - Annotation construction: `src/strategy/engine.ts` (returned `annotations`)
@@ -120,8 +127,8 @@ Uploaded CSV/folder data runs through this pipeline first and is treated as the 
 - Explain panel rendering: `src/ui/ExplainPanel.tsx`
 
 ### Inspect computed FRD / FGD candidate dates
-1. Upload files.
-2. Observe `Detected candidate dates` line in UI.
+1. Confirm the backend/API dataset is loaded in the UI source panel.
+2. Observe the screened day/date outputs in the app.
 3. For code-level inspection, set breakpoint/log in `detectCandidates(...)` in `src/strategy/engine.ts`.
 
 ### Inspect selected Day 3 state
@@ -186,7 +193,7 @@ When state transitions look wrong:
 
 ### Common failure cases and how to debug
 1. Empty/NaN chart values:
-   - Check CSV headers and numeric parsing in `parseCsv`.
+   - Check backend payload normalization in `src/data/loadDatasets.ts` and confirm `bars1m` contains numeric OHLCV fields.
 2. Candidate list empty unexpectedly:
    - Verify daily aggregation and candidate predicates in `detectCandidates`.
 3. Explain panel says setup incomplete:
@@ -194,7 +201,7 @@ When state transitions look wrong:
 4. Wrong timeframe shape:
    - Validate bucket keys in `key(...)` and grouped output in `aggregate(...)`.
 
-- Use the symbol dropdown immediately to the right of the file input.
+- Use the symbol dropdown in the top control row.
 - The dropdown options come from the current dataset list.
 - When you change symbol, the screened table, day selector, chart, and explain panel update together.
 

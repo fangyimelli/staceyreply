@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { sampleBars } from './data/sampleData';
-import { parseFile } from './parser/parseLocalData';
-import { parseFrdFgdWindows } from './parser/parseFrdFgdWindows';
+import { buildSampleDatasetsResponse, loadDatasets, toSymbolDatasets, type BackendDatasetsResponse } from './data/loadDatasets';
 import { formatFrontendScreenedPayload } from './result/formatter';
-import type { FrontendScreenedPayload, ReplayState, ReplyMode, StrategyLine, SymbolDataset, Timeframe } from './types/domain';
+import type { FrontendScreenedPayload, ReplayState, ReplyMode, StrategyLine, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
 import { formatDebugArtifacts, formatDebugPayload } from './ui/debugFormat';
 import { ExplainPanel } from './ui/ExplainPanel';
@@ -17,7 +15,7 @@ const clampIndex = (index: number, start: number, end: number) => {
 };
 
 export default function App() {
-  const [datasets, setDatasets] = useState<SymbolDataset[]>([{ symbol: 'SAMPLE', bars1m: sampleBars() }]);
+  const [datasetResponse, setDatasetResponse] = useState<BackendDatasetsResponse>(buildSampleDatasetsResponse());
   const [symbol, setSymbol] = useState('SAMPLE');
   const [tf, setTf] = useState<Timeframe>('5m');
   const [line, setLine] = useState<StrategyLine>('FGD');
@@ -40,22 +38,17 @@ export default function App() {
   });
 
   useEffect(() => {
-    const loadBuiltInWindows = async () => {
-      try {
-        const response = await fetch('/sample/frd_fgd_three_day_windows.csv');
-        if (!response.ok) return;
-        const csvText = await response.text();
-        const bars = parseFrdFgdWindows(csvText);
-        if (!bars.length) return;
-        setDatasets([{ symbol: 'FRD_FGD_BUILTIN', bars1m: bars }]);
-        setSymbol('FRD_FGD_BUILTIN');
-      } catch {
-        // Keep SAMPLE fallback dataset when built-in CSV is unavailable.
-      }
+    const loadBackendDatasets = async () => {
+      const response = await loadDatasets();
+      setDatasetResponse(response);
+      setSymbol(response.datasets[0]?.pair ?? 'SAMPLE');
     };
 
-    void loadBuiltInWindows();
+    void loadBackendDatasets();
   }, []);
+
+  const datasets = useMemo(() => toSymbolDatasets(datasetResponse), [datasetResponse]);
+  const activeDataset = useMemo(() => datasetResponse.datasets.find((dataset) => dataset.pair === symbol) ?? datasetResponse.datasets[0], [datasetResponse, symbol]);
 
   const formatted = useMemo(
     () =>
@@ -144,14 +137,6 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [replayState.isPlaying, replayState.isFinished, replayState.playSpeed, replayState.currentBarIndex, replayState.replayEndIndex]);
 
-  const handleFiles = async (files: FileList | null) => {
-    if (!files) return;
-    const parsed = await Promise.all([...files].map(parseFile));
-    const nextDatasets = parsed.map((file) => ({ symbol: file.symbol, bars1m: file.bars }));
-    setDatasets(nextDatasets);
-    setSymbol(nextDatasets[0]?.symbol ?? 'SAMPLE');
-  };
-
   const applyTradeToPnl = () => {
     const trade = uiPayload.dayAnalysis.trade;
     if (trade) setTotalPnl((value) => value + trade.pnlPips);
@@ -201,9 +186,8 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: 'Inter, Arial, sans-serif', padding: 10 }}>
-      <h2>Stacey Burke Day 3 Chart Reply (Local)</h2>
+      <h2>Stacey Burke Day 3 Chart Reply (Backend/API)</h2>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <input type="file" multiple accept=".csv,.json" onChange={(e: any) => void handleFiles(e.target.files)} />
         <select value={symbol} onChange={(e: any) => setSymbol(e.target.value)}>{datasets.map((d) => <option key={d.symbol}>{d.symbol}</option>)}</select>
         <select value={tf} onChange={(e: any) => setTf(e.target.value as Timeframe)}>{timeframes.map((t) => <option key={t}>{t}</option>)}</select>
         <select value={line} onChange={(e: any) => setLine(e.target.value as StrategyLine)}>
@@ -233,6 +217,8 @@ export default function App() {
       </div>
 
       <section style={{ margin: '12px 0', padding: 10, background: '#f8fafc', border: '1px solid #cbd5e1' }}>
+        <div><strong>資料來源:</strong> {datasetResponse.loadedFrom === 'backend-api' ? 'Backend API' : 'Sample mode fallback'}</div>
+        <div><strong>目前商品:</strong> {activeDataset?.pair ?? 'n/a'} / {activeDataset?.metadata.timezone ?? 'America/New_York'}</div>
         <strong>Replay 範圍:</strong> {uiPayload.replayMeta.scopeLabel}
         <div>目前揭露進度: {uiPayload.revealedBars.length} / {uiPayload.fullDayBars.length} 根（index {replayState.currentBarIndex}）</div>
       </section>
