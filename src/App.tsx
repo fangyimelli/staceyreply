@@ -48,7 +48,9 @@ export default function App() {
   }, []);
 
   const datasets = useMemo(() => toSymbolDatasets(datasetResponse), [datasetResponse]);
-  const activeDataset = useMemo(() => datasetResponse.datasets.find((dataset) => dataset.pair === symbol) ?? datasetResponse.datasets[0], [datasetResponse, symbol]);
+  const activeDataset = useMemo(() => datasets.find((dataset) => dataset.symbol === symbol) ?? datasets[0], [datasets, symbol]);
+  const activeRecord = useMemo(() => datasetResponse.datasets.find((dataset) => dataset.pair === symbol) ?? datasetResponse.datasets[0], [datasetResponse, symbol]);
+  const hasReplayableBars = activeDataset?.bars1m.length > 0;
 
   const formatted = useMemo(
     () =>
@@ -68,33 +70,11 @@ export default function App() {
           replayEndIndex: replayState.replayEndIndex,
         },
       }),
-    [
-      datasets,
-      enableFGD,
-      enableFRD,
-      replyMode,
-      symbol,
-      tf,
-      line,
-      practiceOnly,
-      selectedDate,
-      manualEntry,
-      manualExit,
-      replayState.currentBarIndex,
-      replayState.replayStartIndex,
-      replayState.replayEndIndex,
-    ]
+    [datasets, enableFGD, enableFRD, replyMode, symbol, tf, line, practiceOnly, selectedDate, manualEntry, manualExit, replayState.currentBarIndex, replayState.replayStartIndex, replayState.replayEndIndex],
   );
   const uiPayload: FrontendScreenedPayload = formatted.payload;
   const screenedResults = uiPayload.screenedResults;
-  const importedSignalRows = activeDataset?.metadata.signals.length
-    ? activeDataset.metadata.signals.map((signal) => ({
-        pair: signal.pair,
-        date: signal.date,
-        signal: signal.signal,
-        status: 'backend' as const,
-      }))
-    : uiPayload.importedSignalRows.filter((row) => row.pair === uiPayload.activeSymbol);
+  const importedSignalRows = activeDataset?.importedSignals ?? [];
   const day = uiPayload.selectedDay;
 
   useEffect(() => {
@@ -121,7 +101,7 @@ export default function App() {
   }, [uiPayload.replayDefaults.replayStartIndex, uiPayload.replayDefaults.replayEndIndex, day]);
 
   useEffect(() => {
-    if (!replayState.isPlaying || replayState.isFinished) return undefined;
+    if (!replayState.isPlaying || replayState.isFinished || !hasReplayableBars) return undefined;
 
     const timer = window.setTimeout(() => {
       setReplayState((current) => {
@@ -143,7 +123,7 @@ export default function App() {
     }, replayState.playSpeed);
 
     return () => window.clearTimeout(timer);
-  }, [replayState.isPlaying, replayState.isFinished, replayState.playSpeed, replayState.currentBarIndex, replayState.replayEndIndex]);
+  }, [replayState.isPlaying, replayState.isFinished, replayState.playSpeed, replayState.currentBarIndex, replayState.replayEndIndex, hasReplayableBars]);
 
   const applyTradeToPnl = () => {
     const trade = uiPayload.dayAnalysis.trade;
@@ -151,6 +131,7 @@ export default function App() {
   };
 
   const startReplay = () => {
+    if (!hasReplayableBars) return;
     setReplayState((current) => ({
       ...current,
       isPlaying: current.replayEndIndex > current.replayStartIndex,
@@ -158,11 +139,10 @@ export default function App() {
     }));
   };
 
-  const pauseReplay = () => {
-    setReplayState((current) => ({ ...current, isPlaying: false }));
-  };
+  const pauseReplay = () => setReplayState((current) => ({ ...current, isPlaying: false }));
 
   const finishReplay = () => {
+    if (!hasReplayableBars) return;
     setReplayState((current) => ({
       ...current,
       isPlaying: false,
@@ -172,6 +152,7 @@ export default function App() {
   };
 
   const replayAgain = () => {
+    if (!hasReplayableBars) return;
     setReplayState((current) => ({
       ...current,
       isPlaying: false,
@@ -181,6 +162,7 @@ export default function App() {
   };
 
   const stepReplay = (direction: -1 | 1) => {
+    if (!hasReplayableBars) return;
     setReplayState((current) => {
       const nextIndex = clampIndex(current.currentBarIndex + direction, current.replayStartIndex, current.replayEndIndex);
       return {
@@ -192,48 +174,60 @@ export default function App() {
     });
   };
 
+  const importedFields = activeRecord?.metadata.importedFields ?? [];
+  const derivedFields = activeRecord?.metadata.derivedFields ?? [];
+  const barsStatusLabel = activeDataset?.bars1mStatus === 'replayable-real'
+    ? '真實 1m bars（可回放）'
+    : activeDataset?.bars1mStatus === 'sample-synthetic'
+      ? 'sample/synthetic bars（僅本地 fallback）'
+      : '僅 metadata 摘要（不可回放）';
+
   return (
     <div style={{ fontFamily: 'Inter, Arial, sans-serif', padding: 10 }}>
-      <h2>Stacey Burke Day 3 Chart Reply (Backend/API)</h2>
+      <h2>Stacey Burke Day 3 Chart Reply</h2>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <select value={symbol} onChange={(e: any) => setSymbol(e.target.value)}>{datasets.map((d) => <option key={d.symbol}>{d.symbol}</option>)}</select>
-        <select value={tf} onChange={(e: any) => setTf(e.target.value as Timeframe)}>{timeframes.map((t) => <option key={t}>{t}</option>)}</select>
-        <select value={line} onChange={(e: any) => setLine(e.target.value as StrategyLine)}>
+        <select value={tf} onChange={(e: any) => setTf(e.target.value as Timeframe)} disabled={!hasReplayableBars}>{timeframes.map((t) => <option key={t}>{t}</option>)}</select>
+        <select value={line} onChange={(e: any) => setLine(e.target.value as StrategyLine)} disabled={!hasReplayableBars}>
           <option>FGD</option><option>FRD</option>
         </select>
-        <label><input type="checkbox" checked={enableFGD} onChange={(e: any) => setEnableFGD(e.target.checked)} />FGD on</label>
-        <label><input type="checkbox" checked={enableFRD} onChange={(e: any) => setEnableFRD(e.target.checked)} />FRD on</label>
+        <label><input type="checkbox" checked={enableFGD} onChange={(e: any) => setEnableFGD(e.target.checked)} disabled={!hasReplayableBars} />FGD on</label>
+        <label><input type="checkbox" checked={enableFRD} onChange={(e: any) => setEnableFRD(e.target.checked)} disabled={!hasReplayableBars} />FRD on</label>
         <label><input type="checkbox" checked={practiceOnly} onChange={(e: any) => setPracticeOnly(e.target.checked)} />Practice mode (filtered dates only)</label>
         <select value={day} onChange={(e: any) => setSelectedDate(e.target.value)}>{uiPayload.dayChoices.map((d) => <option key={d}>{d}</option>)}</select>
-        <select value={replyMode} onChange={(e: any) => setReplyMode(e.target.value as ReplyMode)}><option value="auto">Auto Reply</option><option value="manual">Manual Reply</option></select>
+        <select value={replyMode} onChange={(e: any) => setReplyMode(e.target.value as ReplyMode)} disabled={!hasReplayableBars}><option value="auto">Auto Reply</option><option value="manual">Manual Reply</option></select>
         {replyMode === 'manual' && (
           <>
-            <input placeholder="entry" value={manualEntry} onChange={(e: any) => setManualEntry(e.target.value)} />
-            <input placeholder="exit" value={manualExit} onChange={(e: any) => setManualExit(e.target.value)} />
+            <input placeholder="entry" value={manualEntry} onChange={(e: any) => setManualEntry(e.target.value)} disabled={!hasReplayableBars} />
+            <input placeholder="exit" value={manualExit} onChange={(e: any) => setManualExit(e.target.value)} disabled={!hasReplayableBars} />
           </>
         )}
-        <button onClick={startReplay} disabled={uiPayload.revealedBars.length === 0 || replayState.isPlaying}>開始播放</button>
+        <button onClick={startReplay} disabled={!hasReplayableBars || uiPayload.revealedBars.length === 0 || replayState.isPlaying}>開始播放</button>
         <button onClick={pauseReplay} disabled={!replayState.isPlaying}>暫停</button>
-        <button onClick={finishReplay} disabled={uiPayload.revealedBars.length === 0 || replayState.isFinished}>結束</button>
-        <button onClick={replayAgain} disabled={uiPayload.fullDayBars.length === 0}>重播</button>
-        <button onClick={() => stepReplay(-1)} disabled={replayState.currentBarIndex <= replayState.replayStartIndex}>上一根</button>
-        <button onClick={() => stepReplay(1)} disabled={replayState.currentBarIndex >= replayState.replayEndIndex}>下一根</button>
-        <select value={replayState.playSpeed} onChange={(e: any) => setReplayState((current) => ({ ...current, playSpeed: Number(e.target.value) }))}>
+        <button onClick={finishReplay} disabled={!hasReplayableBars || uiPayload.revealedBars.length === 0 || replayState.isFinished}>結束</button>
+        <button onClick={replayAgain} disabled={!hasReplayableBars || uiPayload.fullDayBars.length === 0}>重播</button>
+        <button onClick={() => stepReplay(-1)} disabled={!hasReplayableBars || replayState.currentBarIndex <= replayState.replayStartIndex}>上一根</button>
+        <button onClick={() => stepReplay(1)} disabled={!hasReplayableBars || replayState.currentBarIndex >= replayState.replayEndIndex}>下一根</button>
+        <select value={replayState.playSpeed} onChange={(e: any) => setReplayState((current) => ({ ...current, playSpeed: Number(e.target.value) }))} disabled={!hasReplayableBars}>
           {replaySpeedOptions.map((speed) => <option key={speed} value={speed}>{speed} ms</option>)}
         </select>
-        <button onClick={applyTradeToPnl}>Apply trade to PnL</button>
+        <button onClick={applyTradeToPnl} disabled={!hasReplayableBars}>Apply trade to PnL</button>
       </div>
 
       <section style={{ margin: '12px 0', padding: 10, background: '#f8fafc', border: '1px solid #cbd5e1' }}>
         <div><strong>資料來源:</strong> {datasetResponse.loadedFrom === 'backend-api' ? 'Backend API' : 'Sample mode fallback'}</div>
-        <div><strong>目前商品:</strong> {activeDataset?.pair ?? 'n/a'} / {activeDataset?.metadata.timezone ?? 'America/New_York'}</div>
-        <strong>Replay 範圍:</strong> {uiPayload.replayMeta.scopeLabel}
+        <div><strong>目前商品:</strong> {activeDataset?.symbol ?? 'n/a'} / {activeDataset?.timezone ?? 'America/New_York'}</div>
+        <div><strong>1m bars 狀態:</strong> {barsStatusLabel}</div>
+        <div><strong>原始匯入欄位:</strong> {importedFields.join(', ') || 'pair, date, signal'}</div>
+        <div><strong>前端推導欄位:</strong> {derivedFields.join(', ') || 'candidate classification, rule-traceable analysis'}</div>
+        <strong>Replay 範圍:</strong> {hasReplayableBars ? uiPayload.replayMeta.scopeLabel : '尚無真實 1m bars，僅顯示匯入 metadata 摘要。'}
         <div>目前揭露進度: {uiPayload.revealedBars.length} / {uiPayload.fullDayBars.length} 根（index {replayState.currentBarIndex}）</div>
       </section>
 
       <section style={{ margin: '12px 0', display: 'grid', gap: 12 }}>
         <div>
-          <h3>已匯入資料 / 候選清單</h3>
+          <h3>原始匯入 metadata</h3>
+          <p style={{ marginTop: 0, color: '#475569' }}>這裡只列出後台匯入的 pair/date/signal 摘要，不代表完整 intraday chart 已可用。</p>
           {importedSignalRows.length === 0 ? (
             <p>No imported candidate rows found for this symbol.</p>
           ) : (
@@ -244,6 +238,7 @@ export default function App() {
                   <th style={{ textAlign: 'left' }}>Date</th>
                   <th style={{ textAlign: 'left' }}>Signal</th>
                   <th style={{ textAlign: 'left' }}>Status</th>
+                  <th style={{ textAlign: 'left' }}>Notes</th>
                 </tr>
               </thead>
               <tbody>
@@ -253,6 +248,7 @@ export default function App() {
                     <td>{row.date}</td>
                     <td>{row.signal}</td>
                     <td>{row.status ?? 'n/a'}</td>
+                    <td>{row.notes ?? 'raw imported summary'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -261,8 +257,11 @@ export default function App() {
         </div>
 
         <div>
-          <h3>Screened Results (Final)</h3>
-          {screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).length === 0 ? (
+          <h3>前端推導候選 / 分析結果</h3>
+          <p style={{ marginTop: 0, color: '#475569' }}>以下結果只會在存在 replayable 1m bars 或 sample/synthetic fallback 時產生，避免和原始匯入欄位混淆。</p>
+          {!hasReplayableBars ? (
+            <p>目前後台只提供 metadata 摘要；不顯示假 intraday chart，也不執行 replay 分析。</p>
+          ) : screenedResults.filter((row) => row.symbol === uiPayload.activeSymbol).length === 0 ? (
             <p>No final screened results passed for this symbol.</p>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -325,6 +324,8 @@ export default function App() {
             los={uiPayload.dayAnalysis.los}
             hod={uiPayload.dayAnalysis.hod}
             lod={uiPayload.dayAnalysis.lod}
+            emptyStateTitle={hasReplayableBars ? 'Replay chart unavailable' : '尚未提供可回放真實 1m bars'}
+            emptyStateBody={hasReplayableBars ? '目前選取日期沒有可繪製的 replay bars。' : '目前資料只包含原始匯入 metadata，前端不再用 synthetic bars 假裝成完整 intraday chart。若要啟用圖表與 replay，backend 必須提供真實 1m bars contract。'}
           />
         </div>
         <ExplainPanel explain={uiPayload.dayAnalysis.explain} trade={uiPayload.dayAnalysis.trade} totalPnl={totalPnl} />

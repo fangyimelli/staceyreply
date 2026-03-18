@@ -84,12 +84,12 @@ const toScreenedRow = (analysis: InternalCandidateAnalysis, replyMode: ReplyMode
   };
 };
 
-
 const toImportedSignalRow = (analysis: InternalCandidateAnalysis): ImportedSignalRow => ({
   pair: analysis.symbol,
   date: analysis.candidate.date,
   signal: analysis.candidate.type,
   status: analysis.dayAnalysis.explain.entryAllowed ? 'pass' : 'fail',
+  notes: 'Derived candidate from frontend analysis over replayable 1m bars.',
 });
 
 const buildReplayPayload = (dayBars: OhlcvBar[], replayWindow?: FormatterConfig['replayWindow']) => {
@@ -105,18 +105,21 @@ const buildReplayPayload = (dayBars: OhlcvBar[], replayWindow?: FormatterConfig[
     replayEndIndex,
     currentBarIndex,
     revealedBars,
-    replayScopeLabel: 'Day 3 replay starts from the selected NY day\'s first intraday bar and ends at that day\'s last intraday bar.',
+    replayScopeLabel: "Day 3 replay starts from the selected NY day's first intraday bar and ends at that day's last intraday bar.",
   };
 };
+
+const emptyDayAnalysis = emptyPayload().payload.dayAnalysis;
 
 export const formatFrontendScreenedPayload = (config: FormatterConfig): { payload: FrontendScreenedPayload; debug: DebugPayload } => {
   const { datasets, lineFilter, replyMode, symbol, timeframe, line, practiceOnly, selectedDate, manualTrade, replayWindow } = config;
 
   if (datasets.length === 0) return emptyPayload();
 
-  const internalCandidateAnalysis = datasets.flatMap((dataset) => {
+  const analyzableDatasets = datasets.filter((dataset) => dataset.bars1m.length > 0);
+  const internalCandidateAnalysis = analyzableDatasets.flatMap((dataset) => {
     const candidates = detectCandidates(dataset.symbol, dataset.bars1m).filter(
-      (candidate) => (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD)
+      (candidate) => (candidate.type === 'FGD' && lineFilter.enableFGD) || (candidate.type === 'FRD' && lineFilter.enableFRD),
     );
 
     return candidates.map((candidate) => ({
@@ -126,21 +129,44 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
     }));
   });
 
-  const importedSignalRows = internalCandidateAnalysis.map((analysis) => toImportedSignalRow(analysis));
+  const active = datasets.find((dataset) => dataset.symbol === symbol) ?? datasets[0];
+  const importedSignalRows = active.importedSignals.length
+    ? active.importedSignals
+    : internalCandidateAnalysis.filter((analysis) => analysis.symbol === active.symbol).map((analysis) => toImportedSignalRow(analysis));
   const screenedResults = internalCandidateAnalysis.map((analysis) => toScreenedRow(analysis, replyMode)).filter((row) => row.validity === 'pass');
 
-  const active = datasets.find((dataset) => dataset.symbol === symbol) ?? datasets[0];
-  const bars = aggregateFrom1m(active.bars1m, timeframe);
-
+  const bars = active.bars1m.length > 0 ? aggregateFrom1m(active.bars1m, timeframe) : [];
   const allDayChoices = [...new Set(bars.map((bar) => bar.time.slice(0, 10)))];
   const screenedDayChoices = screenedResults.filter((row) => row.symbol === active.symbol).map((row) => row.candidateDate);
-  const dayChoices = practiceOnly ? screenedDayChoices : allDayChoices;
-  const selectedDayValue = selectedDate || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10);
+  const fallbackImportedDates = importedSignalRows.map((row) => row.date);
+  const dayChoices = practiceOnly
+    ? screenedDayChoices.length
+      ? screenedDayChoices
+      : fallbackImportedDates
+    : allDayChoices.length
+      ? allDayChoices
+      : fallbackImportedDates;
+  const selectedDayValue = selectedDate || dayChoices[0] || bars[bars.length - 1]?.time.slice(0, 10) || importedSignalRows[0]?.date || '';
 
   const fullDayBars = bars.filter((bar) => bar.time.slice(0, 10) === selectedDayValue);
   const replayPayload = buildReplayPayload(fullDayBars, replayWindow);
-  const revealedDayBars1m = active.bars1m.filter((bar) => bar.time <= (replayPayload.revealedBars[replayPayload.revealedBars.length - 1]?.time ?? ''));
-  const dayAnalysis = evaluateDay(line, revealedDayBars1m, selectedDayValue, replyMode, manualTrade, active.symbol);
+  const lastRevealedTime = replayPayload.revealedBars[replayPayload.revealedBars.length - 1]?.time ?? '';
+  const revealedDayBars1m = active.bars1m.filter((bar) => bar.time <= lastRevealedTime);
+  const dayAnalysis = selectedDayValue && active.bars1m.length > 0
+    ? evaluateDay(line, revealedDayBars1m, selectedDayValue, replyMode, manualTrade, active.symbol)
+    : {
+        ...emptyDayAnalysis,
+        explain: {
+          ...emptyDayAnalysis.explain,
+          stage: active.bars1mStatus === 'metadata-only' ? 'Metadata imported; replay bars unavailable' : 'Sample/synthetic mode',
+          missingConditions: active.bars1mStatus === 'metadata-only'
+            ? ['Backend imported metadata only. Real replayable 1m bars are required before intraday chart/replay can run.']
+            : ['Current dataset is sample/synthetic and should not be mistaken for imported real 1m bars.'],
+          reasons: active.bars1mStatus === 'metadata-only'
+            ? ['Showing imported pair/date/signal summary only; frontend analysis waits for real 1m bars.']
+            : ['Showing sample/synthetic bars for local runnable fallback.'],
+        },
+      };
 
   return {
     payload: {
@@ -164,7 +190,7 @@ export const formatFrontendScreenedPayload = (config: FormatterConfig): { payloa
       },
     },
     debug: {
-      candidatesBySymbol: Object.fromEntries(datasets.map((dataset) => [dataset.symbol, detectCandidates(dataset.symbol, dataset.bars1m)])),
+      candidatesBySymbol: Object.fromEntries(analyzableDatasets.map((dataset) => [dataset.symbol, detectCandidates(dataset.symbol, dataset.bars1m)])),
       internalCandidateAnalysis,
     },
   };

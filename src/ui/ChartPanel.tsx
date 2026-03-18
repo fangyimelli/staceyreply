@@ -23,6 +23,8 @@ interface Props {
   los?: number;
   hod?: number;
   lod?: number;
+  emptyStateTitle?: string;
+  emptyStateBody?: string;
 }
 
 interface ChartRow extends OhlcvBar {
@@ -60,15 +62,7 @@ const CandlestickLayer = ({ formattedGraphicalItems }: any) => {
         return (
           <g key={payload.time}>
             <line x1={wickX} y1={highY} x2={wickX} y2={lowY} stroke="#334155" strokeWidth={1.2} />
-            <rect
-              x={bodyX}
-              y={bodyY}
-              width={bodyWidth}
-              height={bodyHeight}
-              fill={fill}
-              stroke={fill}
-              rx={1}
-            />
+            <rect x={bodyX} y={bodyY} width={bodyWidth} height={bodyHeight} fill={fill} stroke={fill} rx={1} />
           </g>
         );
       })}
@@ -110,7 +104,16 @@ const CustomTooltip = ({ active, label, payload }: any) => {
   );
 };
 
-export function ChartPanel({ bars, ema20, annotations, previousClose, hos, los, hod, lod }: Props) {
+export function ChartPanel({ bars, ema20, annotations, previousClose, hos, los, hod, lod, emptyStateTitle, emptyStateBody }: Props) {
+  if (bars.length === 0) {
+    return (
+      <div style={{ minHeight: 560, border: '1px dashed #94a3b8', borderRadius: 8, padding: 20, background: '#f8fafc' }}>
+        <h3 style={{ marginTop: 0 }}>{emptyStateTitle ?? 'Replay chart unavailable'}</h3>
+        <p>{emptyStateBody ?? 'This dataset does not include replayable 1m bars, so the app only shows imported metadata.'}</p>
+      </div>
+    );
+  }
+
   const data: ChartRow[] = bars.map((bar, index) => ({
     ...bar,
     index,
@@ -130,7 +133,7 @@ export function ChartPanel({ bars, ema20, annotations, previousClose, hos, los, 
     <ResponsiveContainer width="100%" height={560}>
       <ComposedChart data={data} margin={{ top: 16, right: 32, left: 8, bottom: 16 }}>
         <XAxis dataKey="label" minTickGap={40} />
-        <YAxis domain={[ 'auto', 'auto' ]} width={90} />
+        <YAxis domain={['auto', 'auto']} width={90} />
         <Tooltip content={<CustomTooltip />} />
         <Bar dataKey="wickTop" fill="transparent" isAnimationActive={false} />
         <Customized component={CandlestickLayer} />

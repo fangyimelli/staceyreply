@@ -27,6 +27,34 @@ Local single-page app for Day 3 practice / reply workflow. The current productio
 
 ---
 
+
+## Imported metadata vs replayable 1m bars
+
+The UI now separates **raw imported metadata** from **frontend-derived candidate / analysis output**.
+
+- **Raw imported metadata** = fields supplied directly by the backend import, such as `pair`, `date`, `signal`, and any backend-declared import fields.
+- **Frontend-derived fields** = candidate screening, explain-panel judgments, replay state, annotations, target tiers, and other rule-traceable analysis computed in the browser.
+- If the backend provides only `pair/date/signal` summary rows, the app shows the metadata table only and does **not** pretend a full intraday chart is available.
+- If the backend provides real replayable 1m bars, those bars populate `SymbolDataset.bars1m` and power chart / replay / analysis.
+- Sample mode remains runnable locally, but its bars are explicitly labeled as **sample/synthetic** so users do not confuse them with imported real-market data.
+
+### Backend dataset contract
+- Endpoint: `/api/datasets/day3`
+- Each dataset record should contain:
+  - `pair`
+  - `bars1m` (real 1m OHLCV bars when replay is supported; otherwise may be empty)
+  - `metadata.source`
+  - `metadata.timezone`
+  - `metadata.signals[]` with `pair`, `date`, `signal`
+  - `metadata.bars1mStatus` = `replayable-real`, `metadata-only`, or `sample-synthetic`
+  - `metadata.importedFields[]` listing raw imported columns shown in the UI
+  - `metadata.derivedFields[]` listing fields that are produced by frontend analysis
+
+### Current synthetic-window parser note
+- `src/parser/parseFrdFgdWindows.ts` no longer fabricates production OHLC bars from `frd_fgd_three_day_windows.csv`.
+- That CSV is treated as summary metadata only unless a separate backend payload provides real replayable 1m bars.
+- The old synthetic bar approach was acceptable for temporary demo scaffolding only and should not be used as the formal chart source.
+
 ## Install dependencies
 
 ```bash
