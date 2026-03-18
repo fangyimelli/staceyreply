@@ -50,6 +50,14 @@ export interface DatasetFile {
   isSample?: boolean;
 }
 
+export interface DatasetManifestItem {
+  id: string;
+  label: string;
+  path: string;
+  kind: 'csv' | 'json';
+  isSample?: boolean;
+}
+
 export interface ParsedDataset {
   datasetId: string;
   symbol: string;

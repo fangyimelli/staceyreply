@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { loadParsedDatasets } from './data/loadDatasets';
+import { loadDatasetManifest, loadParsedDataset } from './data/loadDatasets';
 import { buildReplayAnalysis } from './strategy/engine';
-import type { ParsedDataset, ReplayMode, Timeframe } from './types/domain';
+import type { DatasetManifestItem, ParsedDataset, ReplayMode, Timeframe } from './types/domain';
 import { ChartPanel } from './ui/ChartPanel';
 import { ExplainPanel } from './ui/ExplainPanel';
 import { nextStageStop } from './replay/engine';
@@ -14,17 +14,53 @@ const ema = (values: number[], period: number) => {
 };
 
 export default function App() {
-  const [datasets] = useState<ParsedDataset[]>(loadParsedDatasets());
-  const [datasetId, setDatasetId] = useState(datasets[0]?.datasetId ?? '');
+  const [datasets] = useState<DatasetManifestItem[]>(loadDatasetManifest());
+  const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '');
+  const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
+  const [isDatasetLoading, setIsDatasetLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [mode, setMode] = useState<ReplayMode>('pause');
   const [speed, setSpeed] = useState(400);
-  const activeDataset = useMemo(() => datasets.find((item) => item.datasetId === datasetId) ?? datasets[0], [datasets, datasetId]);
   const [currentBarIndex, setCurrentBarIndex] = useState(0);
-  const analysis = useMemo(() => buildReplayAnalysis(activeDataset.datasetId, activeDataset.symbol, activeDataset.bars1m, currentBarIndex), [activeDataset, currentBarIndex]);
 
-  useEffect(() => { setCurrentBarIndex(analysis.replayStartIndex); }, [activeDataset.datasetId]);
   useEffect(() => {
+    const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0];
+    if (!selectedDataset) return;
+
+    let cancelled = false;
+    setIsDatasetLoading(true);
+    setMode('pause');
+
+    loadParsedDataset(selectedDataset)
+      .then((dataset) => {
+        if (cancelled) return;
+        setActiveDataset(dataset);
+        setCurrentBarIndex(0);
+        setIsDatasetLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActiveDataset(null);
+        setIsDatasetLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [datasets, datasetId]);
+
+  const analysis = useMemo(() => {
+    if (!activeDataset) return null;
+    return buildReplayAnalysis(activeDataset.datasetId, activeDataset.symbol, activeDataset.bars1m, currentBarIndex);
+  }, [activeDataset, currentBarIndex]);
+
+  useEffect(() => {
+    if (!analysis || !activeDataset) return;
+    setCurrentBarIndex(analysis.replayStartIndex);
+  }, [activeDataset?.datasetId, analysis?.replayStartIndex]);
+
+  useEffect(() => {
+    if (!analysis) return;
     if (mode !== 'auto') return;
     const timer = window.setTimeout(() => {
       const stop = nextStageStop(analysis.eventLog, currentBarIndex);
@@ -35,7 +71,22 @@ export default function App() {
       setCurrentBarIndex((value) => Math.min(value + 1, analysis.replayEndIndex));
     }, speed);
     return () => window.clearTimeout(timer);
-  }, [mode, currentBarIndex, analysis.replayEndIndex, analysis.eventLog, speed]);
+  }, [mode, currentBarIndex, analysis, speed]);
+
+  if (!activeDataset || !analysis) {
+    return <div className="app-shell">
+      <header>
+        <h1>Stacey Reply Replay</h1>
+        <p>Fixed-folder data source: <code>staceyreply/dist/mnt/data</code>. No upload UI, no broker API.</p>
+      </header>
+      <section className="control-grid">
+        <label>Dataset<select value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.label.replace(/\.(csv|json)$/i, '').toUpperCase()}{dataset.isSample ? ' (sample mode)' : ''}</option>)}</select></label>
+      </section>
+      <section className="info-strip">
+        <div>{isDatasetLoading ? 'Loading dataset…' : 'No dataset available.'}</div>
+      </section>
+    </div>;
+  }
 
   const bars = analysis.timeframeBars[timeframe].filter((bar) => new Date(bar.time).getTime() <= new Date(activeDataset.bars1m[Math.min(currentBarIndex, activeDataset.bars1m.length - 1)]?.time ?? bar.time).getTime());
   const ema20 = ema(bars.map((bar) => bar.close), 20);
@@ -56,7 +107,7 @@ export default function App() {
       <p>Fixed-folder data source: <code>staceyreply/dist/mnt/data</code>. No upload UI, no broker API.</p>
     </header>
     <section className="control-grid">
-      <label>Dataset<select value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>{datasets.map((dataset) => <option key={dataset.datasetId} value={dataset.datasetId}>{dataset.symbol}{dataset.isSample ? ' (sample mode)' : ''}</option>)}</select></label>
+      <label>Dataset<select value={datasetId} onChange={(e) => setDatasetId(e.target.value)}>{datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.label.replace(/\.(csv|json)$/i, '').toUpperCase()}{dataset.isSample ? ' (sample mode)' : ''}</option>)}</select></label>
       <label>Timeframe<select value={timeframe} onChange={(e) => setTimeframe(e.target.value as Timeframe)}>{tfs.map((tf) => <option key={tf} value={tf}>{tf}</option>)}</select></label>
       <label>Replay mode<select value={mode} onChange={(e) => setMode(e.target.value as ReplayMode)}><option value="pause">Pause</option><option value="auto">Auto Replay</option><option value="semi">Semi Replay</option></select></label>
       <label>Speed<select value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>{speedOptions.map((option) => <option key={option} value={option}>{option} ms</option>)}</select></label>
@@ -66,6 +117,7 @@ export default function App() {
       <button onClick={nextStep}>Continue / Next step</button>
     </section>
     <section className="info-strip">
+      <div>Dataset status: {isDatasetLoading ? 'loading' : 'ready'}</div>
       <div>Trade day: {analysis.selectedTradeDay}</div>
       <div>Current stage: {analysis.stage}</div>
       <div>Can reply: {analysis.lastReplyEval.canReply ? 'Yes' : 'No'}</div>
