@@ -1,5 +1,16 @@
 import { aggregateBars } from '../aggregation/timeframe';
-import type { Annotation, EventLogItem, OhlcvBar, ReplayAnalysis, ReplayStageId, RuleTraceItem, Timeframe, TradeLevel } from '../types/domain';
+import type {
+  Annotation,
+  EventLogItem,
+  OhlcvBar,
+  ReplayAnalysis,
+  ReplayDatasetAnalysis,
+  ReplayStageId,
+  ReplayVisibility,
+  RuleTraceItem,
+  Timeframe,
+  TradeLevel,
+} from '../types/domain';
 import { byNyDate, strategyNyDate, strategyNyLabel, strategyNyTime, strategyTime } from '../utils/nyDate';
 import { validateDataset } from '../validation/datasetValidation';
 
@@ -19,7 +30,35 @@ const id = (stage: ReplayStageId, suffix: string) => `${stage}-${suffix}`;
 const makeEvent = (stage: ReplayStageId, title: string, summary: string, detail: string, visibleFromIndex: number, trace: RuleTraceItem[], barTime?: string, prices?: Record<string, number>): EventLogItem => ({ id: id(stage, String(visibleFromIndex)), stage, title, summary, detail, statusBanner: title, visibleFromIndex, barTime, prices, trace });
 const makeAnnotation = (kind: Annotation['kind'], index: number, barTime: string, price: number, label: string, reasoning: string, trace: RuleTraceItem[]): Annotation => ({ id: `${kind}-${barTime}`, kind, barTime, price, label, reasoning, trace, visibleFromIndex: index });
 
-export const buildReplayAnalysis = (datasetId: string, symbol: string, bars1m: OhlcvBar[], currentBarIndex: number): ReplayAnalysis => {
+const resolveReplayVisibility = (analysis: ReplayDatasetAnalysis, currentBarIndex: number): ReplayVisibility => {
+  const visibleEvents = analysis.eventLog.filter((event) => event.visibleFromIndex <= currentBarIndex);
+  const visibleAnnotations = analysis.annotations.filter((annotation) => annotation.visibleFromIndex <= currentBarIndex);
+  const canEnter = analysis.eventLog.some((event) => event.stage === 'entry' && event.title === 'Entry valid');
+  const stage = visibleEvents.slice(-1)[0]?.stage ?? (analysis.invalidReasons.length ? 'invalid' : 'background');
+  const statusBanner = analysis.invalidReasons[0] ?? visibleEvents.slice(-1)[0]?.statusBanner ?? 'Replay ready';
+  const currentReasoning = visibleEvents.slice(-3).map((event) => event.detail);
+
+  if (!canEnter && !analysis.invalidReasons.length) {
+    currentReasoning.push('Waiting for source → stop hunt → 123 → 20EMA → entry gate sequence.');
+  }
+
+  return {
+    stage,
+    canEnter,
+    statusBanner,
+    currentReasoning,
+    currentBarIndex,
+    visibleEvents,
+    visibleAnnotations,
+    lastReplyEval: {
+      stage,
+      canReply: canEnter,
+      explanation: canEnter ? 'Entry gate is open.' : analysis.missingConditions[0] ?? analysis.invalidReasons[0] ?? 'Waiting for next gate.',
+    },
+  };
+};
+
+export const buildReplayDatasetAnalysis = (datasetId: string, symbol: string, bars1m: OhlcvBar[]): ReplayDatasetAnalysis => {
   const timeframeBars = Object.fromEntries(tfList.map((tf) => [tf, aggregateBars(bars1m, tf)])) as Record<Timeframe, OhlcvBar[]>;
   const invalidIssues = validateDataset(bars1m);
   const groupedByDay = byNyDate(bars1m);
@@ -47,7 +86,6 @@ export const buildReplayAnalysis = (datasetId: string, symbol: string, bars1m: O
   const eventLog: EventLogItem[] = [];
   const annotations: Annotation[] = [];
   const missingConditions: string[] = [];
-  const currentReasoning: string[] = [];
 
   if (d2) {
     const trace = [{ ruleName: 'Background day', timeframe: '1D', passed: dump || pump, reason: dump ? 'Dump Day detected from bearish D-2 close.' : pump ? 'Pump Day detected from bullish D-2 close.' : 'D-2 is neutral.', prices: { open: d2.open, close: d2.close, range: d2.high - d2.low }, times: { day: strategyNyDate(strategyTime(d2)), sourceStart: d2.sourceStartTime ?? d2.sourceTime ?? d2.time, sourceEnd: d2.sourceEndTime ?? d2.sourceTime ?? d2.time } } satisfies RuleTraceItem];
@@ -159,13 +197,7 @@ export const buildReplayAnalysis = (datasetId: string, symbol: string, bars1m: O
   targetLevels.forEach((level) => {
     if (entryIndex !== -1) annotations.push(makeAnnotation(`tp${level.tier}` as Annotation['kind'], entryIndex, strategyTime(bars1m[entryIndex]), level.price, `TP${level.tier}`, level.reason, []));
   });
-  const recommendedTarget = hitTier ?? (entryIndex !== -1 ? 30 : undefined);
-  const canEnter = eventLog.some((event) => event.stage === 'entry' && event.title === 'Entry valid');
-  const stage = eventLog.filter((event) => event.visibleFromIndex <= currentBarIndex).slice(-1)[0]?.stage ?? (invalidIssues.length ? 'invalid' : 'background');
-  const visibleEvents = eventLog.filter((event) => event.visibleFromIndex <= currentBarIndex);
-  const statusBanner = invalidIssues[0]?.message ?? visibleEvents.slice(-1)[0]?.statusBanner ?? 'Replay ready';
-  currentReasoning.push(...visibleEvents.slice(-3).map((event) => event.detail));
-  if (!canEnter && !invalidIssues.length) currentReasoning.push('Waiting for source → stop hunt → 123 → 20EMA → entry gate sequence.');
+
   const quality = invalidIssues.length ? 'invalid' : template === 'FGD' && d1 && pips(Math.abs(d1.close - d1.open)) >= 40 ? 'strong' : template === 'FRD' && d1 && d2 && d1.high <= d2.high && d1.low >= d2.low ? 'strong' : template === 'INCOMPLETE' ? 'weak' : 'acceptable';
   const invalidReasons = invalidIssues.map((issue) => issue.message);
   if (invalidReasons.length) eventLog.push(makeEvent('invalid', invalidReasons[0], 'Dataset validation failed.', invalidIssues.map((issue) => issue.detail).join(' '), 0, [], strategyTime(bars1m[0] ?? { time: '' })));
@@ -178,17 +210,12 @@ export const buildReplayAnalysis = (datasetId: string, symbol: string, bars1m: O
     bias,
     quality,
     selectedTradeDay: tradeDay,
-    stage,
-    canEnter,
-    statusBanner,
     invalidReasons,
     missingConditions,
-    currentReasoning,
-    nextExpectation: canEnter ? 'Manage TP30/35/40/50 and stop behavior.' : template === 'FGD' ? 'Next: watch LOS source, stop hunt, 123, and 20EMA reclaim.' : template === 'FRD' ? 'Next: watch HOS source, stop hunt, 123, and 20EMA rejection.' : 'Next: fix dataset or load a different instrument file.',
+    nextExpectation: eventLog.some((event) => event.stage === 'entry' && event.title === 'Entry valid') ? 'Manage TP30/35/40/50 and stop behavior.' : template === 'FGD' ? 'Next: watch LOS source, stop hunt, 123, and 20EMA reclaim.' : template === 'FRD' ? 'Next: watch HOS source, stop hunt, 123, and 20EMA rejection.' : 'Next: fix dataset or load a different instrument file.',
     eventLog,
     ruleTrace,
     annotations,
-    currentBarIndex,
     replayStartIndex,
     replayEndIndex,
     stopPrice,
@@ -200,9 +227,13 @@ export const buildReplayAnalysis = (datasetId: string, symbol: string, bars1m: O
     hod: Number.isFinite(hod) ? hod : undefined,
     lod: Number.isFinite(lod) ? lod : undefined,
     targetLevels,
-    recommendedTarget,
-    lastReplyEval: { stage, canReply: canEnter, explanation: canEnter ? 'Entry gate is open.' : missingConditions[0] ?? invalidReasons[0] ?? 'Waiting for next gate.' },
+    recommendedTarget: hitTier ?? (entryIndex !== -1 ? 30 : undefined),
   };
 };
+
+export const buildReplayAnalysis = (datasetAnalysis: ReplayDatasetAnalysis, currentBarIndex: number): ReplayAnalysis => ({
+  ...datasetAnalysis,
+  ...resolveReplayVisibility(datasetAnalysis, currentBarIndex),
+});
 
 export const toNyLabel = strategyNyLabel;
