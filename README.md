@@ -30,17 +30,19 @@ npm run dev
 ## Fixed-folder data flow
 
 1. 專案啟動時以 `import.meta.glob` 掃描 `dist/mnt/data/*.{csv,json}`。
-2. 每個檔案都被視為已預篩的 FRD/FGD 候選資料來源。
-3. UI 只提供 dataset selector，不提供任何 upload / drag-and-drop 流程。
-4. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
-5. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
-6. `source/raw time` 的語義是 MT fixed EST / UTC-5 / no DST；`normalized strategy time` 的語義是 `America/New_York`，供 strategy、session、day bucket 與 replay UI 使用。
-7. 若來源時間落在紐約夏令時間期間，normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
-8. strategy / validation 仍會重新檢查資料是否真的足夠形成 Day 3 模板。
+2. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
+3. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
+4. `source/raw time` 的語義是 MT fixed EST / UTC-5 / no DST；`normalized strategy time` 的語義是 `America/New_York`，供 strategy、session、day bucket 與 replay UI 使用。
+5. 若來源時間落在紐約夏令時間期間，normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
+6. strategy 先做 dataset-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
+7. UI 先提供 dataset selector，再提供該 dataset 內的候選日期 selector / 清單。
+8. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
+9. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
 
 ## Dataset switching
 
 - 左上 `Dataset` 下拉選單切換商品 / 檔案
+- `Candidate Day 3` 會列出該 dataset 掃描出的候選日期，而不是把整個檔案直接當成單一 trade day
 - `sample mode` 為內建完整案例
 - 固定資料夾中的檔案也會出現在同一個 selector
 

@@ -1,8 +1,10 @@
 import { aggregateBars } from "../aggregation/timeframe";
 import type {
   Annotation,
+  CandidateTradeDay,
   EventLogItem,
   OhlcvBar,
+  PracticeStatus,
   ReplayAnalysis,
   ReplayDatasetAnalysis,
   ReplayStageId,
@@ -34,6 +36,27 @@ const inNySession = (bar: OhlcvBar) =>
   strategyNyTime(strategyTime(bar)) >= "07:00" &&
   strategyNyTime(strategyTime(bar)) <= "11:00";
 const id = (stage: ReplayStageId, suffix: string) => `${stage}-${suffix}`;
+const sliceBarsThroughTradeDay = (bars1m: OhlcvBar[], selectedTradeDay: string) =>
+  bars1m.filter((bar) => strategyNyDate(strategyTime(bar)) <= selectedTradeDay);
+const summarizeCandidate = (
+  template: ReplayDatasetAnalysis["template"],
+  invalidReasons: string[],
+  missingConditions: string[],
+) => {
+  if (invalidReasons.length) return invalidReasons[0];
+  if (template === "FGD") return "FGD candidate detected for Day 3 review.";
+  if (template === "FRD") return "FRD candidate detected for Day 3 review.";
+  return missingConditions[0] ?? "Day 3 template is incomplete.";
+};
+const resolvePracticeStatus = (
+  template: ReplayDatasetAnalysis["template"],
+  invalidReasons: string[],
+): PracticeStatus => {
+  if (invalidReasons.length || template === "INVALID") return "filtered-out";
+  return template === "FGD" || template === "FRD"
+    ? "needs-practice"
+    : "auto-only";
+};
 
 const makeEvent = (
   stage: ReplayStageId,
@@ -139,18 +162,23 @@ export const buildReplayDatasetAnalysis = (
   datasetId: string,
   symbol: string,
   bars1m: OhlcvBar[],
+  selectedTradeDay?: string,
 ): ReplayDatasetAnalysis => {
-  const timeframeBars = Object.fromEntries(
-    tfList.map((tf) => [tf, aggregateBars(bars1m, tf)]),
-  ) as Record<Timeframe, OhlcvBar[]>;
-  const invalidIssues = validateDataset(bars1m);
   const groupedByDay = byNyDate(bars1m);
   const days = Object.keys(groupedByDay).sort();
-  const tradeDay = days[days.length - 1] ?? "";
+  const tradeDay = selectedTradeDay ?? days[days.length - 1] ?? "";
+  const scopedBars = selectedTradeDay
+    ? sliceBarsThroughTradeDay(bars1m, tradeDay)
+    : bars1m;
+  const timeframeBars = Object.fromEntries(
+    tfList.map((tf) => [tf, aggregateBars(scopedBars, tf)]),
+  ) as Record<Timeframe, OhlcvBar[]>;
+  const invalidIssues = validateDataset(scopedBars);
+  const scopedGroupedByDay = byNyDate(scopedBars);
   const daily = timeframeBars["1D"];
   const d2 = daily[daily.length - 3];
   const d1 = daily[daily.length - 2];
-  const tradeGroup = groupedByDay[tradeDay] ?? [];
+  const tradeGroup = scopedGroupedByDay[tradeDay] ?? [];
   const session = tradeGroup.filter(inNySession);
   const five = aggregateBars(session, "5m");
   const ema5 = ema(five, 20);
@@ -294,11 +322,11 @@ export const buildReplayDatasetAnalysis = (
     );
   }
 
-  const startIndex = bars1m.findIndex(
+  const startIndex = scopedBars.findIndex(
     (bar) => strategyNyDate(strategyTime(bar)) === tradeDay && inNySession(bar),
   );
   const replayStartIndex = Math.max(0, startIndex);
-  const replayEndIndex = bars1m.length - 1;
+  const replayEndIndex = scopedBars.length - 1;
   if (!session.length)
     missingConditions.push("Trade day New York session unavailable.");
   eventLog.push(
@@ -717,7 +745,7 @@ export const buildReplayDatasetAnalysis = (
       }
       if (emaIndex !== -1) {
         const anchorBar = five[emaIndex];
-        const global = bars1m.findIndex(
+        const global = scopedBars.findIndex(
           (bar) => strategyTime(bar) === strategyTime(anchorBar),
         );
         const trace = [
@@ -769,7 +797,7 @@ export const buildReplayDatasetAnalysis = (
         );
       } else {
         const anchorBar = five[five.length - 1];
-        const global = bars1m.findIndex(
+        const global = scopedBars.findIndex(
           (bar) => strategyTime(bar) === strategyTime(anchorBar),
         );
         const trace = [
@@ -822,11 +850,11 @@ export const buildReplayDatasetAnalysis = (
     if (p1 !== -1 && emaIndex !== -1 && sourcePrice !== undefined) {
       entryIndex = Math.max(
         replayStartIndex + breakout,
-        bars1m.findIndex(
+        scopedBars.findIndex(
           (bar) => strategyTime(bar) === strategyTime(five[emaIndex]),
         ),
       );
-      entryPrice = bars1m[entryIndex]?.close;
+      entryPrice = scopedBars[entryIndex]?.close;
       const stopDistance =
         entryPrice !== undefined && stopPrice !== undefined
           ? pips(Math.abs(entryPrice - stopPrice))
@@ -846,9 +874,9 @@ export const buildReplayDatasetAnalysis = (
             stopDistance,
           },
           times: {
-            strategyEntry: strategyTime(bars1m[entryIndex] ?? { time: "" }),
+            strategyEntry: strategyTime(scopedBars[entryIndex] ?? { time: "" }),
             sourceEntry:
-              bars1m[entryIndex]?.sourceTime ?? bars1m[entryIndex]?.time ?? "",
+              scopedBars[entryIndex]?.sourceTime ?? scopedBars[entryIndex]?.time ?? "",
           },
         } satisfies RuleTraceItem,
       ];
@@ -864,14 +892,14 @@ export const buildReplayDatasetAnalysis = (
             : "Skip: stop too large",
           entryIndex,
           trace,
-          strategyTime(bars1m[entryIndex] ?? session[0]),
+          strategyTime(scopedBars[entryIndex] ?? session[0]),
         ),
       );
       annotations.push(
         makeAnnotation(
           "entry",
           entryIndex,
-          strategyTime(bars1m[entryIndex] ?? session[0]),
+          strategyTime(scopedBars[entryIndex] ?? session[0]),
           entryPrice ?? 0,
           "Entry",
           "Entry becomes valid only after all gates align.",
@@ -928,7 +956,7 @@ export const buildReplayDatasetAnalysis = (
   const pattern123Ready = p1 !== -1;
   const emaConfirmed = emaIndex !== -1;
   const maxFavorablePips = entryReady
-    ? bars1m.slice(entryIndex).reduce((maxMove, bar) => {
+    ? scopedBars.slice(entryIndex).reduce((maxMove, bar) => {
         const move =
           template === "FGD"
             ? pips(bar.high - (entryPrice ?? 0))
@@ -1005,7 +1033,7 @@ export const buildReplayDatasetAnalysis = (
     const hit =
       eligible &&
       entryIndex !== -1 &&
-      bars1m
+      scopedBars
         .slice(entryIndex)
         .some((bar) =>
           template === "FGD" ? bar.high >= price : bar.low <= price,
@@ -1035,7 +1063,7 @@ export const buildReplayDatasetAnalysis = (
         makeAnnotation(
           `tp${level.tier}` as Annotation["kind"],
           entryIndex,
-          strategyTime(bars1m[entryIndex]),
+          strategyTime(scopedBars[entryIndex]),
           level.price,
           `TP${level.tier}`,
           level.reason,
@@ -1059,8 +1087,8 @@ export const buildReplayDatasetAnalysis = (
           eligible: level.eligible ? 1 : 0,
         },
         times: {
-          entryBar: entryIndex !== -1 ? strategyTime(bars1m[entryIndex]) : "",
-          latestBar: strategyTime(bars1m[bars1m.length - 1] ?? { time: "" }),
+          entryBar: entryIndex !== -1 ? strategyTime(scopedBars[entryIndex]) : "",
+          latestBar: strategyTime(scopedBars[scopedBars.length - 1] ?? { time: "" }),
         },
       } satisfies RuleTraceItem,
     ];
@@ -1078,7 +1106,7 @@ export const buildReplayDatasetAnalysis = (
         trace[0].reason,
         entryIndex !== -1 ? entryIndex : replayStartIndex,
         trace,
-        entryIndex !== -1 ? strategyTime(bars1m[entryIndex]) : undefined,
+        entryIndex !== -1 ? strategyTime(scopedBars[entryIndex]) : undefined,
         { target: level.price },
       ),
     );
@@ -1103,7 +1131,7 @@ export const buildReplayDatasetAnalysis = (
         invalidIssues.map((issue) => issue.detail).join(" "),
         0,
         [],
-        strategyTime(bars1m[0] ?? { time: "" }),
+        strategyTime(scopedBars[0] ?? { time: "" }),
       ),
     );
 
@@ -1267,5 +1295,35 @@ export const buildReplayAnalysis = (
   ...resolveCurrentTargetLevels(datasetAnalysis, currentBarIndex),
   ...resolveReplayVisibility(datasetAnalysis, currentBarIndex),
 });
+
+export const scanCandidateTradeDays = (
+  datasetId: string,
+  symbol: string,
+  bars1m: OhlcvBar[],
+): CandidateTradeDay[] => {
+  const days = Object.keys(byNyDate(bars1m)).sort();
+  return days.slice(2).map((tradeDay) => {
+    const analysis = buildReplayDatasetAnalysis(
+      datasetId,
+      symbol,
+      bars1m,
+      tradeDay,
+    );
+    return {
+      date: tradeDay,
+      template: analysis.template,
+      practiceStatus: resolvePracticeStatus(
+        analysis.template,
+        analysis.invalidReasons,
+      ),
+      valid: !analysis.invalidReasons.length,
+      summaryReason: summarizeCandidate(
+        analysis.template,
+        analysis.invalidReasons,
+        analysis.missingConditions,
+      ),
+    };
+  });
+};
 
 export const toNyLabel = strategyNyLabel;
