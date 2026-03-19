@@ -1,6 +1,6 @@
 import type { DatasetValidationIssue, OhlcvBar } from '../types/domain';
 import { aggregateBars } from '../aggregation/timeframe';
-import { byNyDate, strategyNyDate, strategyNyTime, strategyTime } from '../utils/nyDate';
+import { byNyDate, parseExplicitTimestampMs, strategyNyDate, strategyNyTime, strategyTime } from '../utils/nyDate';
 
 const sessionBars = (bars: OhlcvBar[]) => bars.filter((bar) => {
   const t = strategyNyTime(strategyTime(bar));
@@ -16,7 +16,7 @@ const hasIntradayDiscontinuity = (bars: OhlcvBar[]) => bars.slice(1).some((curr,
     return false;
   }
 
-  return new Date(currTime).getTime() - new Date(prevTime).getTime() > 5 * 60_000;
+  return parseExplicitTimestampMs(currTime) - parseExplicitTimestampMs(prevTime) > 5 * 60_000;
 });
 
 export const validateDataset = (bars: OhlcvBar[]): DatasetValidationIssue[] => {

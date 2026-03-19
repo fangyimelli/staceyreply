@@ -1,10 +1,10 @@
 import type { OhlcvBar, Timeframe } from '../types/domain';
-import { strategyNyDate, strategyTime } from '../utils/nyDate';
+import { parseExplicitTimestampMs, strategyNyDate, strategyTime } from '../utils/nyDate';
 
 const minutesByTf: Record<Exclude<Timeframe, '1D'>, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
 
 const bucketStart = (bar: OhlcvBar, minutes: number) => {
-  const ms = new Date(strategyTime(bar)).getTime();
+  const ms = parseExplicitTimestampMs(strategyTime(bar));
   return new Date(Math.floor(ms / (minutes * 60_000)) * minutes * 60_000).toISOString();
 };
 
