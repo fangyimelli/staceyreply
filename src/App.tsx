@@ -24,6 +24,7 @@ import type {
 } from "./types/domain";
 import { ChartPanel } from "./ui/ChartPanel";
 import { ExplainPanel } from "./ui/ExplainPanel";
+import { DebugPanel } from "./ui/DebugPanel";
 
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
@@ -42,6 +43,7 @@ const formatTradeResult = (trade: TradeExecution | null) => {
 const resetTradeState = (mode: ReplayPnLState["mode"]) => createReplayPnLState(mode);
 
 export default function App() {
+  const [page, setPage] = useState<"replay" | "debug">("replay");
   const [datasets] = useState<DatasetManifestItem[]>(loadDatasetManifest());
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? "");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
@@ -317,6 +319,18 @@ export default function App() {
           </p>
         </header>
         <section className="control-grid">
+        <button
+          className={page === "replay" ? "active-toggle" : ""}
+          onClick={() => setPage("replay")}
+        >
+          Replay Page
+        </button>
+        <button
+          className={page === "debug" ? "active-toggle" : ""}
+          onClick={() => setPage("debug")}
+        >
+          Debug Page
+        </button>
           <label>
             Dataset
             <select
@@ -458,6 +472,18 @@ export default function App() {
         </p>
       </header>
       <section className="control-grid">
+        <button
+          className={page === "replay" ? "active-toggle" : ""}
+          onClick={() => setPage("replay")}
+        >
+          Replay Page
+        </button>
+        <button
+          className={page === "debug" ? "active-toggle" : ""}
+          onClick={() => setPage("debug")}
+        >
+          Debug Page
+        </button>
         <label>
           Dataset
           <select
@@ -585,23 +611,32 @@ export default function App() {
           Next target gate: {analysis.targetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}
         </div>
       </section>
-      <main className="main-grid">
+      {page === "replay" ? (
+        <main className="main-grid">
           <ChartPanel
             bars={bars}
             ema20={ema20}
             annotations={visibleAnnotations}
             replayMarkerTime={currentReplayTime}
-          previousClose={analysis.previousClose}
-          hos={analysis.hos}
-          los={analysis.los}
+            previousClose={analysis.previousClose}
+            hos={analysis.hos}
+            los={analysis.los}
             hod={analysis.hod}
             lod={analysis.lod}
             statusBanner={analysis.statusBanner}
             viewport={chartViewport}
             onViewportChange={setChartViewport}
           />
-        <ExplainPanel analysis={{ ...analysis, currentBarIndex }} />
-      </main>
+          <ExplainPanel analysis={analysis} />
+        </main>
+      ) : (
+        <DebugPanel
+          analysis={analysis}
+          activeDataset={activeDataset}
+          candidateTradeDays={selectedTradeDayState?.availableTradeDays ?? []}
+          tradeState={tradeState}
+        />
+      )}
       <section className="footer-grid">
         <div>
           <h3>Detected candidate dates</h3>
