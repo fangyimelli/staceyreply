@@ -1,11 +1,13 @@
 import type { DatasetFile, OhlcvBar, ParsedDataset, TimeSemantics } from '../types/domain';
+import { ISO_WITH_OFFSET_PATTERN, normalizeUnqualifiedNyText, toNyIso } from '../utils/nyDate';
 
 const STRATEGY_TIMEZONE: TimeSemantics['strategy'] = 'america-new_york';
-const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
+
+const sortableEpoch = (bar: Pick<OhlcvBar, 'normalizedTime' | 'time'>) => new Date(bar.normalizedTime ?? bar.time).getTime();
 
 const normalizeBars = (bars: OhlcvBar[]) => bars
   .filter((bar) => Number.isFinite(bar.open) && Number.isFinite(bar.high) && Number.isFinite(bar.low) && Number.isFinite(bar.close))
-  .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  .sort((a, b) => sortableEpoch(a) - sortableEpoch(b));
 
 type ParseSuccess = {
   ok: true;
@@ -29,60 +31,19 @@ const toFixedEstIso = (dateText: string, timeText: string) => {
   return `${year}-${month}-${day}T${timeText}:00-05:00`;
 };
 
-const getNyWallClock = (date: Date) => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(date);
-
-  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
-
-  return {
-    year: read('year'),
-    month: read('month'),
-    day: read('day'),
-    hour: read('hour'),
-    minute: read('minute'),
-    second: read('second'),
-  };
-};
-
-const getNyOffset = (date: Date) => {
-  const offsetText = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    timeZoneName: 'shortOffset',
-    hour: '2-digit',
-  }).formatToParts(date).find((part) => part.type === 'timeZoneName')?.value ?? 'GMT-5';
-
-  const match = offsetText.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/i);
-  if (!match) return '-05:00';
-  const [, sign, hours, minutes] = match;
-  return `${sign}${hours.padStart(2, '0')}:${(minutes ?? '00').padStart(2, '0')}`;
-};
-
-const toNyIso = (date: Date) => {
-  const wallClock = getNyWallClock(date);
-  return `${wallClock.year}-${wallClock.month}-${wallClock.day}T${wallClock.hour}:${wallClock.minute}:${wallClock.second}${getNyOffset(date)}`;
-};
-
 const buildIsoOrTextTimeBar = (time: string, values: Pick<OhlcvBar, 'open' | 'high' | 'low' | 'close' | 'volume'>): OhlcvBar => {
   const hasIsoOffset = ISO_WITH_OFFSET_PATTERN.test(time);
+  const normalizedTime = hasIsoOffset ? time : normalizeUnqualifiedNyText(time) ?? time;
   const semantics: TimeSemantics = {
     source: hasIsoOffset ? 'iso-offset' : 'unqualified-text',
     strategy: STRATEGY_TIMEZONE,
   };
 
   return {
-    time,
+    time: normalizedTime,
     rawTimeText: time,
     sourceTime: time,
-    normalizedTime: time,
+    normalizedTime,
     timeSemantics: semantics,
     ...values,
   };
@@ -154,6 +115,7 @@ const parseCsv = (raw: string): ParseResult => {
 
   if (isMtFixedEstRow(lines[0])) {
     diagnostics.push('Detected MT fixed EST tabular data.');
+    diagnostics.push('Dataset time semantics: MT fixed EST source text -> normalized to reproducible America/New_York offset timestamps for strategy/display.');
     const bars = parseMtFixedEst(stripBom(raw));
     return bars.length
       ? { ok: true, bars, diagnostics }
@@ -182,6 +144,7 @@ const parseCsv = (raw: string): ParseResult => {
   }
 
   const rowErrors: string[] = [];
+  const semanticsSeen = new Set<TimeSemantics['source']>();
   const bars = normalizeBars(lines.slice(1).map((line, index) => {
     const columns = splitDelimitedLine(line, delimiter);
     const pick = (key: string) => columns[headerMap[key]] ?? '';
@@ -191,6 +154,9 @@ const parseCsv = (raw: string): ParseResult => {
     const low = Number(pick('low'));
     const close = Number(pick('close'));
     const volume = headerMap.volume === undefined ? 0 : Number(pick('volume') || 0);
+
+    const sourceSemantics: TimeSemantics['source'] = ISO_WITH_OFFSET_PATTERN.test(time) ? 'iso-offset' : 'unqualified-text';
+    semanticsSeen.add(sourceSemantics);
 
     if (!time) rowErrors.push(`Row ${index + 2}: missing time value.`);
     if (![open, high, low, close].every(Number.isFinite)) rowErrors.push(`Row ${index + 2}: open/high/low/close must be numeric.`);
@@ -208,6 +174,14 @@ const parseCsv = (raw: string): ParseResult => {
     };
   }
 
+  const semanticsSummary = semanticsSeen.size === 1
+    ? [...semanticsSeen][0]
+    : `mixed (${[...semanticsSeen].join(', ')})`;
+  diagnostics.push(`Dataset time semantics: ${semanticsSummary === 'iso-offset'
+    ? 'ISO timestamps with explicit offset/Z are used directly as reproducible strategy timestamps.'
+    : semanticsSummary === 'unqualified-text'
+      ? 'Unqualified local text is parsed as America/New_York wall-clock time and normalized to explicit offset timestamps.'
+      : `Mixed row semantics detected (${[...semanticsSeen].join(', ')}); all unqualified local text rows are normalized to America/New_York explicit offset timestamps.`}`);
   diagnostics.push(`Volume column ${headerMap.volume === undefined ? 'not provided; defaulting to 0.' : 'loaded from source.'}`);
   return { ok: true, bars, diagnostics };
 };
@@ -245,6 +219,7 @@ const parseJson = (raw: string): ParseResult => {
   });
 
   const rowErrors: string[] = [];
+  const semanticsSeen = new Set<TimeSemantics['source']>();
   const bars = normalizeBars(payload.map((bar, index) => {
     const item = (bar && typeof bar === 'object' ? bar : {}) as Record<string, unknown>;
     const time = String(readJsonValue(item, JSON_TIME_KEYS) ?? '');
@@ -254,6 +229,9 @@ const parseJson = (raw: string): ParseResult => {
     const close = Number(item.close);
     const volumeValue = readJsonValue(item, JSON_VOLUME_KEYS);
     const volume = Number(volumeValue ?? 0);
+
+    const sourceSemantics: TimeSemantics['source'] = ISO_WITH_OFFSET_PATTERN.test(time) ? 'iso-offset' : 'unqualified-text';
+    semanticsSeen.add(sourceSemantics);
 
     if (!time) rowErrors.push(`Item ${index + 1}: missing time/date/datetime/timestamp field.`);
     if (![open, high, low, close].every(Number.isFinite)) rowErrors.push(`Item ${index + 1}: open/high/low/close must be numeric.`);
@@ -266,6 +244,14 @@ const parseJson = (raw: string): ParseResult => {
     return { ok: false, bars, errors: rowErrors, diagnostics: diagnostics.concat(`Parsed ${bars.length} valid items before failure.`) };
   }
 
+  const semanticsSummary = semanticsSeen.size === 1
+    ? [...semanticsSeen][0]
+    : `mixed (${[...semanticsSeen].join(', ')})`;
+  diagnostics.push(`Dataset time semantics: ${semanticsSummary === 'iso-offset'
+    ? 'ISO timestamps with explicit offset/Z are used directly as reproducible strategy timestamps.'
+    : semanticsSummary === 'unqualified-text'
+      ? 'Unqualified local text is parsed as America/New_York wall-clock time and normalized to explicit offset timestamps.'
+      : `Mixed item semantics detected (${[...semanticsSeen].join(', ')}); all unqualified local text items are normalized to America/New_York explicit offset timestamps.`}`);
   diagnostics.push(`Volume field ${hasVolumeField ? 'loaded when present.' : 'not provided; defaulting to 0.'}`);
   return { ok: true, bars, diagnostics };
 };

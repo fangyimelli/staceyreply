@@ -7,6 +7,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 支援本機單一 CSV/JSON 檔案載入
 - 支援本機資料夾批次載入 CSV/JSON，並保留相對路徑作為 dataset 來源標示
 - 自動匯入標準 OHLC CSV/JSON，支援 CSV BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
+- 無 offset 的時間字串會依固定規則解析為 `America/New_York` wall-clock，再正規化成帶 offset 的可重現 strategy timestamp
 - 自動匯入 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在 app 內建立 normalized strategy time
 - 策略 session/day bucket 一律使用 `America/New_York`
 - 當來源資料為 MT fixed EST 且紐約進入夏令時間時，內部 normalized strategy time 會自動調整 1 小時，讓 session 對齊紐約交易時段
@@ -53,12 +54,13 @@ npm run dev
 2. 使用者可透過 UI 選擇單一檔案或整個資料夾；每個 CSV/JSON 會先轉成 `DatasetFile` abstraction，再動態生成 manifest。
 3. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
 4. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
-5. `source/raw time` 的語義是 MT fixed EST / UTC-5 / no DST；`normalized strategy time` 的語義是 `America/New_York`，供 strategy、session、day bucket 與 replay UI 使用。
-6. 若來源時間落在紐約夏令時間期間，normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
-7. strategy 先做 dataset-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
-8. UI 先提供資料來源選擇與 dataset selector，再提供該 dataset 內的候選日期 selector / 清單。
-9. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
-10. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
+5. `source/raw time` 的語義會明確區分為三類：ISO with offset、MT fixed EST（UTC-5 / no DST）、以及 unqualified local text。
+6. `normalized strategy time` 一律正規化成可重現的 `America/New_York` offset timestamp，供 strategy、session、day bucket 與 replay UI 使用。
+7. 若來源時間落在紐約夏令時間期間，MT fixed EST 的 normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
+8. strategy 先做 dataset-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
+9. UI 先提供資料來源選擇與 dataset selector，再提供該 dataset 內的候選日期 selector / 清單。
+10. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
+11. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
 
 ## Dataset switching
 
@@ -160,6 +162,7 @@ Diagnostics 也會同步列出：
 - 偵測到的分隔符（comma / tab）
 - 允許的 header / key 別名
 - volume 是否由來源載入，或因為省略而預設為 `0`
+- dataset 採用哪一種時間語義，以及 unqualified local text 是否已正規化為 `America/New_York` offset timestamp
 
 ## Sample mode
 
