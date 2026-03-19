@@ -21,6 +21,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Manual Reply 明確提供 Enter Long / Enter Short / Exit / Reset Trade，且 entry gate 直接綁定 `analysis.lastReplyEval`
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
+- 新增 Debug Page，集中顯示策略流程參數、stage health、target state 與 needs-debug 清單
 - TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
 - Sample mode 直接展示完整 replay 流程
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
@@ -98,6 +99,15 @@ npm run dev
 ### Pause
 
 - 停止播放並保留目前 `lastReplyEval`
+
+## Debug Page 怎麼看
+
+- **Current Context**：當前 dataset、trade day、reply gate、PnL、當前 replay bar 時間與索引
+- **Strategy Parameters**：previous close、HOS/LOS/HOD/LOD、source/stop/entry、recommended target、quality
+- **Pipeline Stage Health**：每個策略 stage 的 pass / warn / fail 狀態與最新說明
+- **Needs Debug**：集中列出 invalid reasons、missing conditions、target missing gate、失敗 rule trace
+- **Event Timeline Debug Table**：逐筆檢查 event log 的 visible index、title、detail、trace 結果
+- **Parse / Dataset Diagnostics**：保留 parse diagnostics、candidate 數量、visible events、failed traces
 
 ## Explain Panel 怎麼看
 

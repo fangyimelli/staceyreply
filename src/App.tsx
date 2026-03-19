@@ -31,6 +31,7 @@ import type {
 } from "./types/domain";
 import { ChartPanel } from "./ui/ChartPanel";
 import { ExplainPanel } from "./ui/ExplainPanel";
+import { DebugPanel } from "./ui/DebugPanel";
 
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
@@ -66,12 +67,9 @@ const folderPickerProps = {
 } as const as Record<string, string | boolean>;
 
 export default function App() {
-  const [userDatasetFiles, setUserDatasetFiles] = useState<DatasetFile[]>([]);
-  const [isImportingDatasets, setIsImportingDatasets] = useState(false);
-  const [datasetImportMessage, setDatasetImportMessage] = useState(
-    "Use sample mode, choose one CSV/JSON file, or load a folder batch.",
-  );
-  const [datasetId, setDatasetId] = useState(builtinSampleManifest[0]?.id ?? "");
+  const [page, setPage] = useState<"replay" | "debug">("replay");
+  const [datasets] = useState<DatasetManifestItem[]>(loadDatasetManifest());
+  const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? "");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
@@ -421,6 +419,18 @@ export default function App() {
           </div>
         </section>
         <section className="control-grid">
+        <button
+          className={page === "replay" ? "active-toggle" : ""}
+          onClick={() => setPage("replay")}
+        >
+          Replay Page
+        </button>
+        <button
+          className={page === "debug" ? "active-toggle" : ""}
+          onClick={() => setPage("debug")}
+        >
+          Debug Page
+        </button>
           <label>
             Dataset
             <select
@@ -603,6 +613,18 @@ export default function App() {
         </div>
       </section>
       <section className="control-grid">
+        <button
+          className={page === "replay" ? "active-toggle" : ""}
+          onClick={() => setPage("replay")}
+        >
+          Replay Page
+        </button>
+        <button
+          className={page === "debug" ? "active-toggle" : ""}
+          onClick={() => setPage("debug")}
+        >
+          Debug Page
+        </button>
         <label>
           Dataset
           <select
@@ -734,23 +756,32 @@ export default function App() {
           Next target gate: {analysis.targetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}
         </div>
       </section>
-      <main className="main-grid">
-        <ChartPanel
-          bars={bars}
-          ema20={ema20}
-          annotations={visibleAnnotations}
-          replayMarkerTime={currentReplayTime}
-          previousClose={analysis.previousClose}
-          hos={analysis.hos}
-          los={analysis.los}
-          hod={analysis.hod}
-          lod={analysis.lod}
-          statusBanner={analysis.statusBanner}
-          viewport={chartViewport}
-          onViewportChange={setChartViewport}
+      {page === "replay" ? (
+        <main className="main-grid">
+          <ChartPanel
+            bars={bars}
+            ema20={ema20}
+            annotations={visibleAnnotations}
+            replayMarkerTime={currentReplayTime}
+            previousClose={analysis.previousClose}
+            hos={analysis.hos}
+            los={analysis.los}
+            hod={analysis.hod}
+            lod={analysis.lod}
+            statusBanner={analysis.statusBanner}
+            viewport={chartViewport}
+            onViewportChange={setChartViewport}
+          />
+          <ExplainPanel analysis={analysis} />
+        </main>
+      ) : (
+        <DebugPanel
+          analysis={analysis}
+          activeDataset={activeDataset}
+          candidateTradeDays={selectedTradeDayState?.availableTradeDays ?? []}
+          tradeState={tradeState}
         />
-        <ExplainPanel analysis={{ ...analysis, currentBarIndex }} />
-      </main>
+      )}
       <section className="footer-grid">
         <div>
           <h3>Detected candidate dates</h3>

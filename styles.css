@@ -21,9 +21,22 @@ code { color: #fde68a; }
 .chart-interaction-layer { width: 100%; cursor: grab; user-select: none; }
 .chart-interaction-layer:active { cursor: grabbing; }
 
-.upload-grid { display: grid; gap: 12px; }
-.upload-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; }
-.upload-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-.upload-actions label { display: grid; gap: 6px; min-width: 220px; }
-.upload-note { color: #94a3b8; margin: 0; }
-input[type="file"] { background: #111827; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; }
+.active-toggle { border-color: #60a5fa; box-shadow: inset 0 0 0 1px #60a5fa; }
+.debug-shell { display: grid; gap: 16px; }
+.debug-header, .debug-section { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; }
+.debug-header p { margin-bottom: 0; color: #94a3b8; }
+.debug-pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.debug-pill { display: inline-flex; padding: 6px 10px; border-radius: 999px; background: #111827; border: 1px solid #334155; }
+.debug-kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.debug-kv-grid > div, .debug-target-card, .debug-stage-card { background: #111827; border: 1px solid #334155; border-radius: 10px; padding: 10px; display: grid; gap: 6px; }
+.debug-kv-grid span { color: #cbd5e1; }
+.debug-stage-grid, .debug-target-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.debug-stage-title-row { display: flex; justify-content: space-between; gap: 8px; }
+.debug-stage-pass { border-color: #22c55e; }
+.debug-stage-warn { border-color: #f59e0b; }
+.debug-stage-fail { border-color: #ef4444; }
+.debug-list { display: grid; gap: 8px; padding-left: 20px; }
+.debug-table-wrap { overflow: auto; }
+.debug-table { width: 100%; border-collapse: collapse; min-width: 720px; }
+.debug-table th, .debug-table td { border: 1px solid #334155; padding: 8px; text-align: left; vertical-align: top; }
+.debug-table th { background: #111827; }
