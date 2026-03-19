@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createUserDatasetManifest,
   fileToDatasetFile,
@@ -68,10 +68,14 @@ const folderPickerProps = {
 
 export default function App() {
   const [page, setPage] = useState<"replay" | "debug">("replay");
-  const [datasets] = useState<DatasetManifestItem[]>(loadDatasetManifest());
-  const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? "");
+  const [userDatasetFiles, setUserDatasetFiles] = useState<DatasetFile[]>([]);
+  const [datasetId, setDatasetId] = useState(builtinSampleManifest[0]?.id ?? "");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
+  const [isImportingDatasets, setIsImportingDatasets] = useState(false);
+  const [datasetImportMessage, setDatasetImportMessage] = useState(
+    "Built-in sample mode ready. You can also load local CSV/JSON data.",
+  );
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
   const [mode, setMode] = useState<ReplayMode>("pause");
   const [speed, setSpeed] = useState(400);
@@ -81,8 +85,9 @@ export default function App() {
     createReplayPnLState("auto"),
   );
   const [chartViewport, setChartViewport] = useState({ startIndex: 0, endIndex: 0 });
-  const tradeIdRef = React.useRef(0);
-  const previousBarsLengthRef = React.useRef(0);
+  const tradeIdRef = useRef(0);
+  const previousBarsLengthRef = useRef(0);
+  const semiPendingStopRef = useRef<number | null>(null);
 
   const datasets = useMemo(
     () => [...builtinSampleManifest, ...createUserDatasetManifest(userDatasetFiles)],
@@ -221,19 +226,54 @@ export default function App() {
     }
   }, [selectedTradeDayState, visibleCandidateTradeDays]);
 
+  const getAdvanceTarget = (barIndex: number) => {
+    if (!analysis) return barIndex;
+    const stop = nextStageStop(analysis.eventLog, barIndex);
+    return stop ?? Math.min(barIndex + 1, analysis.replayEndIndex);
+  };
+
+  const advanceReplayOnce = () => {
+    setCurrentBarIndex((value) => getAdvanceTarget(value));
+  };
+
+  const setReplayBehavior = (action: "pause" | "auto" | "semi" | "advanceToNextStage") => {
+    if (action === "advanceToNextStage") {
+      semiPendingStopRef.current = null;
+      advanceReplayOnce();
+      return;
+    }
+
+    semiPendingStopRef.current = action === "semi" ? semiPendingStopRef.current : null;
+    setMode(action);
+  };
+
   useEffect(() => {
     if (!analysis) return;
     if (mode !== "auto") return;
     const timer = window.setTimeout(() => {
-      const stop = nextStageStop(analysis.eventLog, currentBarIndex);
-      if (stop !== undefined && currentBarIndex + 1 >= stop) {
-        setCurrentBarIndex(stop);
-        return;
-      }
       setCurrentBarIndex((value) => Math.min(value + 1, analysis.replayEndIndex));
     }, speed);
     return () => window.clearTimeout(timer);
-  }, [mode, currentBarIndex, analysis, speed]);
+  }, [mode, analysis, currentBarIndex, speed]);
+
+  useEffect(() => {
+    if (!analysis || mode !== "semi") return;
+
+    if (semiPendingStopRef.current === null) {
+      const stop = nextStageStop(analysis.eventLog, currentBarIndex);
+      const target = stop ?? Math.min(currentBarIndex + 1, analysis.replayEndIndex);
+      semiPendingStopRef.current = target;
+      if (target !== currentBarIndex) {
+        setCurrentBarIndex(target);
+      }
+      return;
+    }
+
+    if (currentBarIndex >= semiPendingStopRef.current) {
+      semiPendingStopRef.current = null;
+      setMode("pause");
+    }
+  }, [mode, analysis, currentBarIndex]);
 
   useEffect(() => {
     if (!analysis) return;
@@ -503,18 +543,18 @@ export default function App() {
     setTradeState(resetTradeState(nextMode));
   };
   const resetReplay = () => {
-    setMode("pause");
+    semiPendingStopRef.current = null;
+    setReplayBehavior("pause");
     setCurrentBarIndex(analysis.replayStartIndex);
     setTradeState((prev) => resetTradeState(prev.mode));
   };
   const nextStep = () => {
-    const stop = nextStageStop(analysis.eventLog, currentBarIndex);
-    setMode("pause");
-    setCurrentBarIndex(stop ?? Math.min(currentBarIndex + 1, analysis.replayEndIndex));
+    setReplayBehavior("advanceToNextStage");
   };
-  const playAuto = () => setMode("auto");
-  const playSemi = () => {
-    setMode("semi");
+  const playAuto = () => setReplayBehavior("auto");
+  const playSemi = () => setReplayBehavior("semi");
+  const continueNextStep = () => {
+    setReplayBehavior("pause");
     nextStep();
   };
   const manualTradeDisabled =
@@ -707,7 +747,7 @@ export default function App() {
         <button onClick={resetReplay}>Reset</button>
         <button onClick={playAuto}>Auto Replay</button>
         <button onClick={playSemi}>Semi Replay</button>
-        <button onClick={nextStep}>Continue / Next step</button>
+        <button onClick={continueNextStep}>Continue / Next step</button>
       </section>
       <section className="control-grid">
         <button
