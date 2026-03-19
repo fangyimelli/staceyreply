@@ -3,11 +3,14 @@ import { loadDatasetManifest, loadParsedDataset } from "./data/loadDatasets";
 import {
   buildReplayAnalysis,
   buildReplayDatasetAnalysis,
+  scanCandidateTradeDays,
 } from "./strategy/engine";
 import type {
+  CandidateTradeDay,
   DatasetManifestItem,
   ParsedDataset,
   ReplayMode,
+  SelectedTradeDayState,
   Timeframe,
 } from "./types/domain";
 import { ChartPanel } from "./ui/ChartPanel";
@@ -28,6 +31,7 @@ export default function App() {
   const [mode, setMode] = useState<ReplayMode>("pause");
   const [speed, setSpeed] = useState(400);
   const [currentBarIndex, setCurrentBarIndex] = useState(0);
+  const [selectedTradeDay, setSelectedTradeDay] = useState("");
 
   useEffect(() => {
     const selectedDataset =
@@ -42,6 +46,7 @@ export default function App() {
       .then((dataset) => {
         if (cancelled) return;
         setActiveDataset(dataset);
+        setSelectedTradeDay("");
         setCurrentBarIndex(0);
         setIsDatasetLoading(false);
       })
@@ -59,12 +64,41 @@ export default function App() {
   const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
     if (activeDataset.parseStatus === "error") return null;
-    return buildReplayDatasetAnalysis(
+    const candidateTradeDays = scanCandidateTradeDays(
       activeDataset.datasetId,
       activeDataset.symbol,
       activeDataset.bars1m,
     );
-  }, [activeDataset]);
+    return buildReplayDatasetAnalysis(
+      activeDataset.datasetId,
+      activeDataset.symbol,
+      activeDataset.bars1m,
+      selectedTradeDay || candidateTradeDays[0]?.date,
+    );
+  }, [activeDataset, selectedTradeDay]);
+
+  const selectedTradeDayState = useMemo<SelectedTradeDayState | null>(() => {
+    if (!activeDataset || activeDataset.parseStatus === "error") return null;
+    const availableTradeDays = scanCandidateTradeDays(
+      activeDataset.datasetId,
+      activeDataset.symbol,
+      activeDataset.bars1m,
+    );
+    return {
+      selectedTradeDay:
+        selectedTradeDay || availableTradeDays[0]?.date || "",
+      availableTradeDays,
+    };
+  }, [activeDataset, selectedTradeDay]);
+
+  const visibleCandidateTradeDays = useMemo<CandidateTradeDay[]>(() => {
+    const candidates = selectedTradeDayState?.availableTradeDays ?? [];
+    return mode === "auto"
+      ? candidates
+      : candidates.filter(
+          (candidate) => candidate.practiceStatus === "needs-practice",
+        );
+  }, [mode, selectedTradeDayState]);
 
   const analysis = useMemo(() => {
     if (!datasetAnalysis) return null;
@@ -75,6 +109,22 @@ export default function App() {
     if (!analysis || !activeDataset) return;
     setCurrentBarIndex(analysis.replayStartIndex);
   }, [activeDataset?.datasetId, analysis?.replayStartIndex]);
+
+  useEffect(() => {
+    const nextTradeDay = visibleCandidateTradeDays[0]?.date ?? "";
+    if (!selectedTradeDayState) return;
+    if (
+      selectedTradeDayState.selectedTradeDay &&
+      visibleCandidateTradeDays.some(
+        (candidate) => candidate.date === selectedTradeDayState.selectedTradeDay,
+      )
+    ) {
+      return;
+    }
+    if (nextTradeDay !== selectedTradeDayState.selectedTradeDay) {
+      setSelectedTradeDay(nextTradeDay);
+    }
+  }, [selectedTradeDayState, visibleCandidateTradeDays]);
 
   useEffect(() => {
     if (!analysis) return;
@@ -119,6 +169,10 @@ export default function App() {
       .find((item) => item.id === datasetId)
       ?.label.replace(/\.(csv|json)$/i, "")
       .toUpperCase() ?? "UNKNOWN";
+  const selectedCandidate =
+    selectedTradeDayState?.availableTradeDays.find(
+      (candidate) => candidate.date === analysis?.selectedTradeDay,
+    ) ?? visibleCandidateTradeDays[0];
 
   if (!activeDataset || !analysis) {
     return (
@@ -143,6 +197,22 @@ export default function App() {
                 <option key={dataset.id} value={dataset.id}>
                   {dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase()}
                   {dataset.isSample ? " (sample mode)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Candidate Day 3
+            <select
+              value={selectedTradeDayState?.selectedTradeDay ?? ""}
+              onChange={(e: { target: { value: string } }) =>
+                setSelectedTradeDay(e.target.value)
+              }
+            >
+              {visibleCandidateTradeDays.map((candidate) => (
+                <option key={candidate.date} value={candidate.date}>
+                  {candidate.date} · {candidate.template} ·{" "}
+                  {candidate.valid ? "valid" : "invalid"}
                 </option>
               ))}
             </select>
@@ -230,6 +300,22 @@ export default function App() {
           </select>
         </label>
         <label>
+          Candidate Day 3
+          <select
+            value={selectedTradeDayState?.selectedTradeDay ?? ""}
+            onChange={(e: { target: { value: string } }) =>
+              setSelectedTradeDay(e.target.value)
+            }
+          >
+            {visibleCandidateTradeDays.map((candidate) => (
+              <option key={candidate.date} value={candidate.date}>
+                {candidate.date} · {candidate.template} ·{" "}
+                {candidate.valid ? "valid" : "invalid"}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           Timeframe
           <select
             value={timeframe}
@@ -281,6 +367,7 @@ export default function App() {
         <div>Dataset status: {isDatasetLoading ? "loading" : "ready"}</div>
         <div>Parse status: {activeDataset.parseStatus}</div>
         <div>Trade day: {analysis.selectedTradeDay}</div>
+        <div>Candidate summary: {selectedCandidate?.summaryReason ?? "none"}</div>
         <div>Current stage: {analysis.stage}</div>
         <div>
           Can reply now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}
@@ -313,6 +400,20 @@ export default function App() {
         />
         <ExplainPanel analysis={{ ...analysis, currentBarIndex }} />
       </main>
+      <section className="footer-grid">
+        <div>
+          <h3>Detected candidate dates</h3>
+          <ul>
+            {visibleCandidateTradeDays.map((candidate) => (
+              <li key={candidate.date}>
+                {candidate.date} — {candidate.template} —{" "}
+                {candidate.valid ? "valid" : "invalid"} —{" "}
+                {candidate.summaryReason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
       <section className="footer-grid">
         <div>
           <h3>Target ladder</h3>

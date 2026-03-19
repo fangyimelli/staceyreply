@@ -5,7 +5,7 @@
 - [x] Include built-in symbols/datasets for immediate use
 - [x] After upload, analyze and screen FRD / FGD candidate dates first
 - [x] Show detected final candidate dates explicitly
-- [x] In practice mode, only show filtered dates
+- [x] In non-auto practice / manual-style review, only show `needs-practice` filtered dates
 - [x] Auto Reply = automatic entry / exit + cumulative PnL
 - [x] Manual Reply = manual entry / exit + cumulative PnL
 - [x] Support 1m / 5m / 15m / 1h / 4h / 1D
@@ -26,6 +26,7 @@
 - [x] Replay can auto-stop at important market/strategy states
 - [x] Replay must auto-pause at key moments and show on-chart state labels
 - [x] Frontend should display only final screened results by default
+- [x] Dataset selection is followed by trade-day candidate selection from scanned dates
 - [x] README
 - [x] Sample mode
 - [x] Auto-generated acceptance checklist

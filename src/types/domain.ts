@@ -1,6 +1,7 @@
 export type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1D";
 export type TemplateType = "FGD" | "FRD" | "INVALID" | "INCOMPLETE";
 export type ReplayMode = "pause" | "auto" | "semi";
+export type PracticeStatus = "needs-practice" | "auto-only" | "filtered-out";
 export type ReplayStageId =
   | "background"
   | "signal"
@@ -180,6 +181,19 @@ export interface ReplayDatasetAnalysis {
   lod?: number;
   targetLevels: TradeLevel[];
   recommendedTarget?: 30 | 35 | 40 | 50;
+}
+
+export interface CandidateTradeDay {
+  date: string;
+  template: TemplateType;
+  practiceStatus: PracticeStatus;
+  valid: boolean;
+  summaryReason: string;
+}
+
+export interface SelectedTradeDayState {
+  selectedTradeDay: string;
+  availableTradeDays: CandidateTradeDay[];
 }
 
 export interface ReplayAnalysis
