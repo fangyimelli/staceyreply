@@ -7,6 +7,18 @@ const sessionBars = (bars: OhlcvBar[]) => bars.filter((bar) => {
   return t >= '07:00' && t <= '11:00';
 });
 
+const hasIntradayDiscontinuity = (bars: OhlcvBar[]) => bars.slice(1).some((curr, index) => {
+  const prev = bars[index];
+  const currTime = strategyTime(curr);
+  const prevTime = strategyTime(prev);
+
+  if (strategyNyDate(currTime) !== strategyNyDate(prevTime)) {
+    return false;
+  }
+
+  return new Date(currTime).getTime() - new Date(prevTime).getTime() > 5 * 60_000;
+});
+
 export const validateDataset = (bars: OhlcvBar[]): DatasetValidationIssue[] => {
   if (!bars.length) {
     return [{ code: 'invalid-format', message: 'Invalid dataset: unable to validate FRD/FGD template', detail: 'CSV/JSON did not produce any valid OHLCV rows.' }];
@@ -33,8 +45,8 @@ export const validateDataset = (bars: OhlcvBar[]): DatasetValidationIssue[] => {
   if (d1 && d1.close === d1.open) issues.push({ code: 'missing-signal-day', message: 'Invalid dataset: missing D-1 signal day', detail: 'D-1 is neutral and does not form FRD/FGD signal direction.' });
   if (tradeDay && sessionBars(grouped[tradeDay.day] ?? []).length < 12) issues.push({ code: 'insufficient-intraday', message: 'Invalid dataset: insufficient Day 3 intraday candles', detail: 'Expected at least 12 one-minute candles in the normalized New York 07:00–11:00 session.' });
   if (daily.length < 2 || daily[daily.length - 2] === undefined) issues.push({ code: 'previous-close-unavailable', message: 'Invalid dataset: previous close unavailable', detail: 'Could not derive yesterday close for the active trade day.' });
-  const gaps = bars.slice(1).some((bar, index) => new Date(strategyTime(bar)).getTime() - new Date(strategyTime(bars[index])).getTime() > 5 * 60_000);
-  if (gaps) issues.push({ code: 'timeframe-discontinuity', message: 'Invalid dataset: unable to validate FRD/FGD template', detail: 'Normalized strategy timeline contains gaps larger than five minutes; source timeline DST shifts are ignored for this check.' });
+  const intradayGaps = Object.values(grouped).some((dayBars) => hasIntradayDiscontinuity(dayBars));
+  if (intradayGaps) issues.push({ code: 'timeframe-discontinuity', message: 'Invalid dataset: unable to validate FRD/FGD template', detail: 'Normalized strategy timeline is missing required intraday continuity inside a New York day bucket; ordinary overnight/session gaps and source timeline DST shifts are ignored for this check.' });
   return issues;
 };
 
