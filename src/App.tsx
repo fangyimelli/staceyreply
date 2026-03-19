@@ -37,7 +37,7 @@ const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
 const builtinSampleManifest = getBuiltinSampleManifest();
 
-const replayModeLabel = (mode: ReplayPnLState["mode"]) =>
+const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
 const tradeSideForTemplate = (template?: string): TradeSide | null =>
   template === "FGD" ? "long" : template === "FRD" ? "short" : null;
@@ -84,6 +84,7 @@ export default function App() {
   const [tradeState, setTradeState] = useState<ReplayPnLState>(
     createReplayPnLState("auto"),
   );
+  const [practiceFilterEnabled, setPracticeFilterEnabled] = useState(false);
   const [chartViewport, setChartViewport] = useState({ startIndex: 0, endIndex: 0 });
   const tradeIdRef = useRef(0);
   const previousBarsLengthRef = useRef(0);
@@ -190,14 +191,16 @@ export default function App() {
     };
   }, [activeDataset, selectedTradeDay]);
 
+  const isPracticeMode = tradeState.mode === "manual" || practiceFilterEnabled;
+
   const visibleCandidateTradeDays = useMemo<CandidateTradeDay[]>(() => {
     const candidates = selectedTradeDayState?.availableTradeDays ?? [];
-    return mode === "auto"
-      ? candidates
-      : candidates.filter(
+    return isPracticeMode
+      ? candidates.filter(
           (candidate) => candidate.practiceStatus === "needs-practice",
-        );
-  }, [mode, selectedTradeDayState]);
+        )
+      : candidates;
+  }, [isPracticeMode, selectedTradeDayState]);
 
   const analysis = useMemo(() => {
     if (!datasetAnalysis) return null;
@@ -211,20 +214,26 @@ export default function App() {
   }, [activeDataset?.datasetId, analysis?.replayStartIndex, analysis?.selectedTradeDay]);
 
   useEffect(() => {
-    const nextTradeDay = visibleCandidateTradeDays[0]?.date ?? "";
     if (!selectedTradeDayState) return;
+
+    const explicitSelection = selectedTradeDay;
     if (
-      selectedTradeDayState.selectedTradeDay &&
-      visibleCandidateTradeDays.some(
-        (candidate) => candidate.date === selectedTradeDayState.selectedTradeDay,
+      explicitSelection &&
+      selectedTradeDayState.availableTradeDays.some(
+        (candidate) => candidate.date === explicitSelection,
       )
     ) {
       return;
     }
+
+    const nextTradeDay = visibleCandidateTradeDays[0]?.date
+      ?? selectedTradeDayState.availableTradeDays[0]?.date
+      ?? "";
+
     if (nextTradeDay !== selectedTradeDayState.selectedTradeDay) {
       setSelectedTradeDay(nextTradeDay);
     }
-  }, [selectedTradeDayState, visibleCandidateTradeDays]);
+  }, [selectedTradeDay, selectedTradeDayState, visibleCandidateTradeDays]);
 
   const getAdvanceTarget = (barIndex: number) => {
     if (!analysis) return barIndex;
@@ -539,7 +548,7 @@ export default function App() {
     );
   }
 
-  const setTradeMode = (nextMode: ReplayPnLState["mode"]) => {
+  const setReplyMode = (nextMode: ReplayPnLState["mode"]) => {
     setTradeState(resetTradeState(nextMode));
   };
   const resetReplay = () => {
@@ -720,15 +729,27 @@ export default function App() {
           </select>
         </label>
         <label>
-          Reply mode
+          Trade / practice mode
           <select
             value={tradeState.mode}
             onChange={(e: { target: { value: string } }) =>
-              setTradeMode(e.target.value as ReplayPnLState["mode"])
+              setReplyMode(e.target.value as ReplayPnLState["mode"])
             }
           >
             <option value="auto">Auto Reply</option>
             <option value="manual">Manual Reply</option>
+          </select>
+        </label>
+        <label>
+          Candidate list filter
+          <select
+            value={practiceFilterEnabled ? "needs-practice" : "all"}
+            onChange={(e: { target: { value: string } }) =>
+              setPracticeFilterEnabled(e.target.value === "needs-practice")
+            }
+          >
+            <option value="all">Show all scanned days</option>
+            <option value="needs-practice">Show needs-practice only</option>
           </select>
         </label>
         <label>
@@ -781,7 +802,8 @@ export default function App() {
         <div>Current stage: {analysis.stage}</div>
         <div>Can reply now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}</div>
         <div>Current gate: {analysis.lastReplyEval.explanation}</div>
-        <div>Reply mode: {replayModeLabel(tradeState.mode)}</div>
+        <div>Trade / practice mode: {replyModeLabel(tradeState.mode)}</div>
+        <div>Candidate list filter: {isPracticeMode ? "needs-practice only" : "all scanned days"}</div>
         <div>
           Current position: {tradeState.currentPosition
             ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)}`
