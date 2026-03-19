@@ -2,6 +2,8 @@ export type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1D";
 export type TemplateType = "FGD" | "FRD" | "INVALID" | "INCOMPLETE";
 export type ReplayMode = "pause" | "auto" | "semi";
 export type PracticeStatus = "needs-practice" | "auto-only" | "filtered-out";
+export type TradeSide = "long" | "short";
+export type TradeResult = "win" | "loss" | "breakeven";
 export type ReplayStageId =
   | "background"
   | "signal"
@@ -153,6 +155,31 @@ export interface ReplayVisibility {
     canReply: boolean;
     explanation: string;
   };
+}
+
+export interface TradeExecution {
+  id: string;
+  mode: "auto" | "manual";
+  side: TradeSide;
+  entryPrice: number;
+  entryBarIndex: number;
+  entryTime: string;
+  exitPrice?: number;
+  exitBarIndex?: number;
+  exitTime?: string;
+  realizedPnL: number;
+  cumulativePnL: number;
+  result?: TradeResult;
+  status: "open" | "closed";
+  exitReason?: string;
+}
+
+export interface ReplayPnLState {
+  mode: "auto" | "manual";
+  currentPosition: TradeExecution | null;
+  trades: TradeExecution[];
+  lastTrade: TradeExecution | null;
+  cumulativePnL: number;
 }
 
 export interface ReplayDatasetAnalysis {
