@@ -17,12 +17,11 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Candidate Day 3 selector 會清楚列出偵測到的日期；非 auto replay 時只顯示 `needs-practice` 候選日
 - FGD / FRD Day 3 規則驗證與 replay analysis
 - dataset validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
-- Pause / Auto Replay / Semi Replay 控制
+- Pause / Auto Replay / Semi Replay
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
 - Manual Reply 明確提供 Enter Long / Enter Short / Exit / Reset Trade，且 entry gate 直接綁定 `analysis.lastReplyEval`
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
-- 主圖為 candlestick chart，並疊加 20EMA、previous close、HOS / LOS、HOD / LOD 與策略 annotation
-- Explain Panel 提供 Current Classification、Historical Reasoning Timeline、Missing Conditions、Rule Trace、Diagnostics
+- Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
 - 不串 broker API，只讀本機固定資料夾歷史數據
 - README、sample mode、acceptance checklist generator 持續維護
