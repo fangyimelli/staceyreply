@@ -4,9 +4,8 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 
 ## Confirmed features
 
-- 固定資料夾掃描：`staceyreply/dist/mnt/data`
-- 啟動後自動讀取固定資料夾中的 CSV/JSON 歷史資料，不提供上傳/拖曳 UI
-- 內建 `sample mode` dataset，可直接進入完整 replay 範例
+- 支援本機單一 CSV/JSON 檔案載入
+- 支援本機資料夾批次載入 CSV/JSON，並保留相對路徑作為 dataset 來源標示
 - 自動匯入標準 OHLC CSV/JSON，支援 CSV BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
 - 自動匯入 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在 app 內建立 normalized strategy time
 - 策略 session/day bucket 一律使用 `America/New_York`
@@ -27,12 +26,11 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Sample mode 直接展示完整 replay 流程
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
 - 圖表有 viewport state，預設追蹤右側最新已揭露 bars，支援滑鼠滾輪縮放與拖曳平移
-- 不串 broker API，只讀本機固定資料夾歷史數據
+- 不串 broker API，只讀本機 sample / 使用者選取的 CSV/JSON 歷史數據
 - README、sample mode、acceptance checklist generator 持續維護
 
 ## Planned / pending
 
-- 上傳單一檔案或資料夾的 UI 流程
 - 圖表 x 軸直接顯示日期 / 時間刻度
 - 類 TradingView 的滑鼠滾輪縮放
 - 類 TradingView 的拖曳 / 平移
@@ -49,24 +47,25 @@ npm run dev
 
 然後打開 Vite 顯示的本機網址。
 
-## Fixed-folder data flow
+## Data source flow
 
-1. 專案啟動時以 `import.meta.glob` 掃描 `dist/mnt/data/*.{csv,json}`。
-2. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
-3. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
-4. `source/raw time` 的語義是 MT fixed EST / UTC-5 / no DST；`normalized strategy time` 的語義是 `America/New_York`，供 strategy、session、day bucket 與 replay UI 使用。
-5. 若來源時間落在紐約夏令時間期間，normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
-6. strategy 先做 dataset-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
-7. UI 先提供 dataset selector，再提供該 dataset 內的候選日期 selector / 清單。
-8. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
-9. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
+1. 啟動後永遠保留內建 `sample mode` manifest，作為可立即操作的確認案例。
+2. 使用者可透過 UI 選擇單一檔案或整個資料夾；每個 CSV/JSON 會先轉成 `DatasetFile` abstraction，再動態生成 manifest。
+3. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
+4. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
+5. `source/raw time` 的語義是 MT fixed EST / UTC-5 / no DST；`normalized strategy time` 的語義是 `America/New_York`，供 strategy、session、day bucket 與 replay UI 使用。
+6. 若來源時間落在紐約夏令時間期間，normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
+7. strategy 先做 dataset-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
+8. UI 先提供資料來源選擇與 dataset selector，再提供該 dataset 內的候選日期 selector / 清單。
+9. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
+10. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
 
 ## Dataset switching
 
-- 左上 `Dataset` 下拉選單切換商品 / 檔案
+- 左上 `Dataset` 下拉選單切換 sample / 單檔 / 資料夾批次中的商品或檔案
 - `Candidate Day 3` 會列出該 dataset 掃描出的候選日期，而不是把整個檔案直接當成單一 trade day
 - `sample mode` 為內建完整案例
-- 固定資料夾中的檔案也會出現在同一個 selector
+- 單檔載入會生成單一使用者 dataset；資料夾批次載入會把每個支援檔案都加入同一個 selector
 
 ## Timeframe switching
 
@@ -170,7 +169,5 @@ Diagnostics 也會同步列出：
 
 ## Removed/Deprecated Log
 
-- 已移除本機 CSV / JSON upload UI
-- 已移除 drag-and-drop upload 流程
 - 已移除以 backend upload metadata 為中心的舊 replay 輸入模式
-- 現在只保留固定資料夾掃描 + sample mode 單一路徑
+- 不再把一般資料來源綁死在固定資料夾掃描；現在改為 sample mode + 使用者單檔/資料夾載入
