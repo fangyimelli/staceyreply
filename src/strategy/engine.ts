@@ -106,6 +106,25 @@ const pushTraceEvent = (
   eventLog.push(event);
 };
 
+const datasetBlocksStageEngine = (analysis: {
+  invalidReasons: string[];
+  template: ReplayDatasetAnalysis["template"];
+}) => analysis.invalidReasons.length > 0 || analysis.template === "INCOMPLETE";
+
+const blockedTargetLevels = (
+  template: ReplayDatasetAnalysis["template"],
+  reason: string,
+): TradeLevel[] =>
+  ([30, 35, 40, 50] as const).map((tier) => ({
+    tier,
+    price: 0,
+    eligible: false,
+    hit: false,
+    status: template === "INVALID" ? "blocked" : "pending",
+    reason,
+    missingGate: reason,
+  }));
+
 const resolveReplayVisibility = (
   analysis: ReplayDatasetAnalysis,
   currentBarIndex: number,
@@ -121,20 +140,36 @@ const resolveReplayVisibility = (
     .filter((event) => event.stage === "entry")
     .slice(-1)[0];
   const canEnter = latestVisibleEntryEvent?.title === "Entry valid";
+  const stageEngineBlocked = datasetBlocksStageEngine(analysis);
   const stage =
-    latestVisibleEvent?.stage ??
-    (analysis.invalidReasons.length ? "invalid" : "background");
+    analysis.invalidReasons.length > 0
+      ? "invalid"
+      : analysis.template === "INCOMPLETE"
+        ? "signal"
+        : (latestVisibleEvent?.stage ?? "background");
   const statusBanner =
     analysis.invalidReasons[0] ??
-    latestVisibleEvent?.statusBanner ??
-    "Replay ready";
-  const currentReasoning = visibleEvents.slice(-3).map((event) => event.detail);
+    (analysis.template === "INCOMPLETE"
+      ? analysis.missingConditions[0] ?? "Day 3 template is incomplete."
+      : latestVisibleEvent?.statusBanner ?? "Replay ready");
+  const currentReasoning =
+    analysis.invalidReasons.length > 0
+      ? [
+          analysis.invalidReasons[0],
+          ...visibleEvents.slice(-2).map((event) => event.detail),
+        ]
+      : analysis.template === "INCOMPLETE"
+        ? [
+            analysis.missingConditions[0] ?? "Day 3 template is incomplete.",
+            ...visibleEvents.slice(-2).map((event) => event.detail),
+          ]
+        : visibleEvents.slice(-3).map((event) => event.detail);
   const waitingForGate =
     analysis.missingConditions[0] ??
     analysis.invalidReasons[0] ??
     "Waiting for next gate.";
 
-  if (!canEnter && !analysis.invalidReasons.length) {
+  if (!canEnter && !stageEngineBlocked) {
     currentReasoning.push(
       "Waiting for source → stop hunt → 123 → 20EMA → entry gate sequence.",
     );
@@ -151,9 +186,14 @@ const resolveReplayVisibility = (
     lastReplyEval: {
       stage,
       canReply: canEnter,
-      explanation: canEnter
-        ? "Current replay marker has unlocked the entry gate."
-        : (latestVisibleEvent?.detail ?? waitingForGate),
+      explanation:
+        analysis.invalidReasons[0] ??
+        (analysis.template === "INCOMPLETE"
+          ? analysis.missingConditions[0] ??
+            "Template is incomplete, so the Day 3 entry workflow stays blocked."
+          : canEnter
+            ? "Current replay marker has unlocked the entry gate."
+            : (latestVisibleEvent?.detail ?? waitingForGate)),
     },
   };
 };
@@ -212,12 +252,18 @@ export const buildReplayDatasetAnalysis = (
         : "INCOMPLETE";
   const bias =
     template === "FGD" ? "bullish" : template === "FRD" ? "bearish" : "neutral";
+  const invalidReasons = invalidIssues.map((issue) => issue.message);
+  const stageEngineAllowed =
+    invalidReasons.length === 0 && template !== "INCOMPLETE";
+  const stageEngineBlockReason = invalidReasons.length
+    ? "Dataset invalid — target tiers remain blocked until validation issues are fixed."
+    : "Template incomplete — target tiers stay pending until a full Day 3 setup is confirmed.";
   const ruleTrace: RuleTraceItem[] = [];
   const eventLog: EventLogItem[] = [];
   const annotations: Annotation[] = [];
   const missingConditions: string[] = [];
 
-  if (d2) {
+  if (d2 && !invalidReasons.length) {
     const trace = [
       {
         ruleName: "Background day",
@@ -258,7 +304,7 @@ export const buildReplayDatasetAnalysis = (
       ),
     );
   }
-  if (d1) {
+  if (d1 && !invalidReasons.length) {
     const inside = Boolean(d2) && d1.high <= d2.high && d1.low >= d2.low;
     const body = pips(Math.abs(d1.close - d1.open));
     const range = pips(d1.high - d1.low);
@@ -329,21 +375,131 @@ export const buildReplayDatasetAnalysis = (
   const replayEndIndex = scopedBars.length - 1;
   if (!session.length)
     missingConditions.push("Trade day New York session unavailable.");
-  eventLog.push(
-    makeEvent(
-      "trade-day",
-      `Day 3 active — ${bias} bias from ${template === "INVALID" ? "invalid dataset" : template}`,
-      "Entered Day 3 New York trading window.",
-      template === "FGD"
-        ? "Day 3 active — bullish bias from FGD"
-        : template === "FRD"
-          ? "Day 3 active — bearish bias from FRD"
-          : "Day 3 active but template is not tradeable.",
+
+  const quality = invalidIssues.length
+    ? "invalid"
+    : template === "FGD" && d1 && pips(Math.abs(d1.close - d1.open)) >= 40
+      ? "strong"
+      : template === "FRD" && d1 && d2 && d1.high <= d2.high && d1.low >= d2.low
+        ? "strong"
+        : template === "INCOMPLETE"
+          ? "weak"
+          : "acceptable";
+
+  if (!stageEngineAllowed) {
+    if (invalidReasons.length) {
+      eventLog.push(
+        makeEvent(
+          "invalid",
+          invalidReasons[0],
+          "Dataset validation failed.",
+          invalidIssues.map((issue) => issue.detail).join(" "),
+          0,
+          [],
+          strategyTime(scopedBars[0] ?? { time: "" }),
+        ),
+      );
+      const validationTrace = invalidIssues.map(
+        (issue): RuleTraceItem => ({
+          ruleName: `Validation: ${issue.code}`,
+          timeframe: "1D",
+          passed: false,
+          reason: issue.detail,
+          prices: {},
+          times: {
+            tradeDay,
+          },
+        }),
+      );
+      pushTraceEvent(
+        eventLog,
+        ruleTrace,
+        makeEvent(
+          "invalid",
+          "Validation diagnostics",
+          "Dataset validation diagnostics collected.",
+          invalidIssues.map((issue) => issue.detail).join(" "),
+          0,
+          validationTrace,
+          strategyTime(scopedBars[0] ?? { time: "" }),
+        ),
+      );
+      eventLog.push(
+        makeEvent(
+          "trade-day",
+          "Candidate summary",
+          summarizeCandidate(template, invalidReasons, missingConditions),
+          "Dataset invalid, so replay stops at candidate/validation review and does not enter the stage engine.",
+          replayStartIndex,
+          [],
+          session[0] ? strategyTime(session[0]) : undefined,
+        ),
+      );
+    } else {
+      missingConditions.unshift(
+        "Template incomplete — do not advance into the full Day 3 entry workflow.",
+      );
+      eventLog.push(
+        makeEvent(
+          "trade-day",
+          "Candidate summary",
+          summarizeCandidate(template, invalidReasons, missingConditions),
+          "Background and signal context are available, but the template is incomplete so source/stop hunt/123/EMA/entry management remain disabled.",
+          replayStartIndex,
+          [],
+          session[0] ? strategyTime(session[0]) : undefined,
+        ),
+      );
+    }
+
+    return {
+      datasetId,
+      symbol,
+      timeframeBars,
+      template,
+      bias,
+      quality,
+      selectedTradeDay: tradeDay,
+      invalidReasons,
+      missingConditions,
+      nextExpectation: invalidReasons.length
+        ? "Next: fix dataset validation issues or load a different instrument file."
+        : "Next: wait for a complete FGD/FRD template before enabling the Day 3 workflow.",
+      eventLog,
+      ruleTrace,
+      annotations,
       replayStartIndex,
-      [],
-      session[0] ? strategyTime(session[0]) : undefined,
-    ),
-  );
+      replayEndIndex,
+      stopPrice: undefined,
+      entryPrice: undefined,
+      sourcePrice: undefined,
+      previousClose,
+      hos: Number.isFinite(hos) ? hos : undefined,
+      los: Number.isFinite(los) ? los : undefined,
+      hod: Number.isFinite(hod) ? hod : undefined,
+      lod: Number.isFinite(lod) ? lod : undefined,
+      targetLevels: blockedTargetLevels(template, stageEngineBlockReason),
+      recommendedTarget: undefined,
+    };
+  }
+
+  if (stageEngineAllowed) {
+    eventLog.push(
+      makeEvent(
+        "trade-day",
+        `Day 3 active — ${bias} bias from ${template === "INVALID" ? "invalid dataset" : template}`,
+        "Entered Day 3 New York trading window.",
+        template === "FGD"
+          ? "Day 3 active — bullish bias from FGD"
+          : template === "FRD"
+            ? "Day 3 active — bearish bias from FRD"
+            : "Day 3 active but template is not tradeable.",
+        replayStartIndex,
+        [],
+        session[0] ? strategyTime(session[0]) : undefined,
+      ),
+    );
+  }
 
   let sourceIndex = -1;
   let sourcePrice: number | undefined;
@@ -1112,29 +1268,6 @@ export const buildReplayDatasetAnalysis = (
     );
   });
 
-  const quality = invalidIssues.length
-    ? "invalid"
-    : template === "FGD" && d1 && pips(Math.abs(d1.close - d1.open)) >= 40
-      ? "strong"
-      : template === "FRD" && d1 && d2 && d1.high <= d2.high && d1.low >= d2.low
-        ? "strong"
-        : template === "INCOMPLETE"
-          ? "weak"
-          : "acceptable";
-  const invalidReasons = invalidIssues.map((issue) => issue.message);
-  if (invalidReasons.length)
-    eventLog.push(
-      makeEvent(
-        "invalid",
-        invalidReasons[0],
-        "Dataset validation failed.",
-        invalidIssues.map((issue) => issue.detail).join(" "),
-        0,
-        [],
-        strategyTime(scopedBars[0] ?? { time: "" }),
-      ),
-    );
-
   return {
     datasetId,
     symbol,
@@ -1180,6 +1313,17 @@ const resolveCurrentTargetLevels = (
   recommendedTarget?: 30 | 35 | 40 | 50;
 } => {
   const bars1m = analysis.timeframeBars["1m"];
+  if (datasetBlocksStageEngine(analysis)) {
+    return {
+      targetLevels: blockedTargetLevels(
+        analysis.template,
+        analysis.invalidReasons.length
+          ? "Dataset invalid — target tiers remain blocked until validation issues are fixed."
+          : "Template incomplete — target tiers stay pending until a full Day 3 setup is confirmed.",
+      ),
+      recommendedTarget: undefined,
+    };
+  }
   const entryEvent = analysis.eventLog.find(
     (event) => event.stage === "entry" && event.title === "Entry valid",
   );
