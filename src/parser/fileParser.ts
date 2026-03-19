@@ -1,11 +1,20 @@
 import type { DatasetFile, OhlcvBar, ParsedDataset, TimeSemantics } from '../types/domain';
+import { normalizeUnqualifiedNyTime, parseExplicitTimestampMs } from '../utils/nyDate';
 
 const STRATEGY_TIMEZONE: TimeSemantics['strategy'] = 'america-new_york';
 const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
 
 const normalizeBars = (bars: OhlcvBar[]) => bars
-  .filter((bar) => Number.isFinite(bar.open) && Number.isFinite(bar.high) && Number.isFinite(bar.low) && Number.isFinite(bar.close))
-  .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  .filter((bar) => {
+    if (!(Number.isFinite(bar.open) && Number.isFinite(bar.high) && Number.isFinite(bar.low) && Number.isFinite(bar.close))) return false;
+    try {
+      parseExplicitTimestampMs(bar.normalizedTime ?? bar.time);
+      return true;
+    } catch {
+      return false;
+    }
+  })
+  .sort((a, b) => parseExplicitTimestampMs(a.normalizedTime ?? a.time) - parseExplicitTimestampMs(b.normalizedTime ?? b.time));
 
 type ParseSuccess = {
   ok: true;
@@ -73,16 +82,17 @@ const toNyIso = (date: Date) => {
 
 const buildIsoOrTextTimeBar = (time: string, values: Pick<OhlcvBar, 'open' | 'high' | 'low' | 'close' | 'volume'>): OhlcvBar => {
   const hasIsoOffset = ISO_WITH_OFFSET_PATTERN.test(time);
+  const normalizedTime = hasIsoOffset ? time : normalizeUnqualifiedNyTime(time);
   const semantics: TimeSemantics = {
     source: hasIsoOffset ? 'iso-offset' : 'unqualified-text',
     strategy: STRATEGY_TIMEZONE,
   };
 
   return {
-    time,
+    time: normalizedTime,
     rawTimeText: time,
     sourceTime: time,
-    normalizedTime: time,
+    normalizedTime,
     timeSemantics: semantics,
     ...values,
   };
@@ -155,6 +165,7 @@ const parseCsv = (raw: string): ParseResult => {
   if (isMtFixedEstRow(lines[0])) {
     diagnostics.push('Detected MT fixed EST tabular data.');
     const bars = parseMtFixedEst(stripBom(raw));
+    diagnostics.push(describeTimeSemantics(bars));
     return bars.length
       ? { ok: true, bars, diagnostics }
       : { ok: false, bars: [], errors: ['MT fixed EST rows were detected but no valid OHLC bars were parsed.'], diagnostics };
@@ -195,8 +206,27 @@ const parseCsv = (raw: string): ParseResult => {
     if (!time) rowErrors.push(`Row ${index + 2}: missing time value.`);
     if (![open, high, low, close].every(Number.isFinite)) rowErrors.push(`Row ${index + 2}: open/high/low/close must be numeric.`);
     if (headerMap.volume !== undefined && !Number.isFinite(volume)) rowErrors.push(`Row ${index + 2}: volume must be numeric when provided.`);
-
-    return buildIsoOrTextTimeBar(time, { open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 });
+    try {
+      return buildIsoOrTextTimeBar(time, { open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unsupported time format.';
+      rowErrors.push(`Row ${index + 2}: ${detail}`);
+      return {
+        time: '',
+        rawTimeText: time,
+        sourceTime: time,
+        normalizedTime: '',
+        timeSemantics: {
+          source: ISO_WITH_OFFSET_PATTERN.test(time) ? 'iso-offset' : 'unqualified-text',
+          strategy: STRATEGY_TIMEZONE,
+        },
+        open,
+        high,
+        low,
+        close,
+        volume: Number.isFinite(volume) ? volume : 0,
+      } satisfies OhlcvBar;
+    }
   }));
 
   if (rowErrors.length) {
@@ -204,11 +234,12 @@ const parseCsv = (raw: string): ParseResult => {
       ok: false,
       bars,
       errors: rowErrors,
-      diagnostics: diagnostics.concat(`Parsed ${bars.length} valid rows before failure.`),
+      diagnostics: diagnostics.concat(`Parsed ${bars.length} valid rows before failure.`, describeTimeSemantics(bars)),
     };
   }
 
   diagnostics.push(`Volume column ${headerMap.volume === undefined ? 'not provided; defaulting to 0.' : 'loaded from source.'}`);
+  diagnostics.push(describeTimeSemantics(bars));
   return { ok: true, bars, diagnostics };
 };
 
@@ -258,15 +289,35 @@ const parseJson = (raw: string): ParseResult => {
     if (!time) rowErrors.push(`Item ${index + 1}: missing time/date/datetime/timestamp field.`);
     if (![open, high, low, close].every(Number.isFinite)) rowErrors.push(`Item ${index + 1}: open/high/low/close must be numeric.`);
     if (volumeValue !== undefined && !Number.isFinite(volume)) rowErrors.push(`Item ${index + 1}: volume/vol must be numeric when provided.`);
-
-    return buildIsoOrTextTimeBar(time, { open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 });
+    try {
+      return buildIsoOrTextTimeBar(time, { open, high, low, close, volume: Number.isFinite(volume) ? volume : 0 });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unsupported time format.';
+      rowErrors.push(`Item ${index + 1}: ${detail}`);
+      return {
+        time: '',
+        rawTimeText: time,
+        sourceTime: time,
+        normalizedTime: '',
+        timeSemantics: {
+          source: ISO_WITH_OFFSET_PATTERN.test(time) ? 'iso-offset' : 'unqualified-text',
+          strategy: STRATEGY_TIMEZONE,
+        },
+        open,
+        high,
+        low,
+        close,
+        volume: Number.isFinite(volume) ? volume : 0,
+      } satisfies OhlcvBar;
+    }
   }));
 
   if (rowErrors.length) {
-    return { ok: false, bars, errors: rowErrors, diagnostics: diagnostics.concat(`Parsed ${bars.length} valid items before failure.`) };
+    return { ok: false, bars, errors: rowErrors, diagnostics: diagnostics.concat(`Parsed ${bars.length} valid items before failure.`, describeTimeSemantics(bars)) };
   }
 
   diagnostics.push(`Volume field ${hasVolumeField ? 'loaded when present.' : 'not provided; defaulting to 0.'}`);
+  diagnostics.push(describeTimeSemantics(bars));
   return { ok: true, bars, diagnostics };
 };
 
@@ -285,4 +336,19 @@ export const parseDatasetFile = (file: DatasetFile): ParsedDataset => {
   };
 };
 
-export { normalizeMtFixedEstRowTime, parseMtFixedEst, toFixedEstIso };
+const describeTimeSemantics = (bars: OhlcvBar[]) => {
+  const semantics = [...new Set(bars.map((bar) => bar.timeSemantics?.source).filter(Boolean))];
+  if (!semantics.length) return 'Time semantics: none detected.';
+  if (semantics.length === 1 && semantics[0] === 'iso-offset') {
+    return 'Time semantics: ISO with offset input; strategy timeline preserves explicit source offsets without host-local parsing.';
+  }
+  if (semantics.length === 1 && semantics[0] === 'fixed-est-no-dst') {
+    return 'Time semantics: MT fixed EST input; source rows are interpreted as UTC-5 wall clock and normalized onto reproducible America/New_York timestamps.';
+  }
+  if (semantics.length === 1 && semantics[0] === 'unqualified-text') {
+    return 'Time semantics: unqualified local text input; parser deterministically interprets rows as America/New_York wall clock and emits explicit offset strategy timestamps.';
+  }
+  return `Time semantics: mixed input (${semantics.join(', ')}); all strategy timestamps are normalized to explicit America/New_York offsets before downstream use.`;
+};
+
+export { describeTimeSemantics, normalizeMtFixedEstRowTime, parseMtFixedEst, toFixedEstIso };
