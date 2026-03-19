@@ -94,6 +94,8 @@ export default function App() {
   const [tradeState, setTradeState] = useState<ReplayPnLState>(
     createReplayPnLState("auto"),
   );
+  const [manualEntryMode, setManualEntryMode] = useState<ManualEntryMode>("strategy");
+  const [manualEntryInput, setManualEntryInput] = useState("");
   const [practiceFilterEnabled, setPracticeFilterEnabled] = useState(false);
   const [chartViewport, setChartViewport] = useState({ startIndex: 0, endIndex: 0 });
   const tradeIdRef = useRef(0);
