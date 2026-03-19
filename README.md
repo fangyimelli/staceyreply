@@ -5,12 +5,17 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 ## Confirmed features
 
 - 固定資料夾掃描：`staceyreply/dist/mnt/data`
-- 啟動後自動讀取 CSV/JSON 歷史資料，不提供上傳/拖曳 UI
+- 啟動後自動讀取固定資料夾中的 CSV/JSON 歷史資料，不提供上傳/拖曳 UI
+- 內建 `sample mode` dataset，可直接進入完整 replay 範例
+- 自動匯入標準 OHLC CSV/JSON，支援 CSV BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
 - 自動匯入 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在 app 內建立 normalized strategy time
 - 策略 session/day bucket 一律使用 `America/New_York`
 - 當來源資料為 MT fixed EST 且紐約進入夏令時間時，內部 normalized strategy time 會自動調整 1 小時，讓 session 對齊紐約交易時段
 - 1m / 5m / 15m / 1h / 4h / 1D timeframe 切換
-- FGD / FRD Day 3 規則驗證
+- 高週期一律由 1m 原始資料聚合
+- dataset-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
+- Candidate Day 3 selector 會清楚列出偵測到的日期；非 auto replay 時只顯示 `needs-practice` 候選日
+- FGD / FRD Day 3 規則驗證與 replay analysis
 - dataset validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
@@ -18,8 +23,18 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
-- Sample mode 直接展示完整 replay 流程
 - 不串 broker API，只讀本機固定資料夾歷史數據
+- README、sample mode、acceptance checklist generator 持續維護
+
+## Planned / pending
+
+- 上傳單一檔案或資料夾的 UI 流程
+- 圖表 x 軸直接顯示日期 / 時間刻度
+- 類 TradingView 的滑鼠滾輪縮放
+- 類 TradingView 的拖曳 / 平移
+- candlestick 厚度 / 間距對 TradingView 體驗做精細調校
+- replay 起點改為「所選 FRD/FGD 日期的前一天」
+- 更完整的擴充說明文件（若未來仍需要）
 
 ## Startup
 
