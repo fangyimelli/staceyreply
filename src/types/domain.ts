@@ -4,6 +4,10 @@ export type ReplayMode = "pause" | "auto" | "semi";
 export type PracticeStatus = "needs-practice" | "auto-only" | "filtered-out";
 export type TradeSide = "long" | "short";
 export type TradeResult = "win" | "loss" | "breakeven";
+export type TradeEntrySemantics =
+  | "strategy-entry"
+  | "manual-execution-user"
+  | "manual-execution-close";
 export type ReplayStageId =
   | "background"
   | "signal"
@@ -166,6 +170,9 @@ export interface TradeExecution {
   mode: "auto" | "manual";
   side: TradeSide;
   entryPrice: number;
+  strategyEntryPrice?: number;
+  manualExecutionPrice?: number;
+  entrySemantics: TradeEntrySemantics;
   entryBarIndex: number;
   entryTime: string;
   exitPrice?: number;
