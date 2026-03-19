@@ -44,6 +44,8 @@ export interface OhlcvBar {
   volume: number;
 }
 
+export type UserDatasetSource = "sample" | "single-file" | "folder-batch";
+
 export interface DatasetFile {
   id: string;
   label: string;
@@ -51,6 +53,7 @@ export interface DatasetFile {
   kind: "csv" | "json";
   raw: string;
   isSample?: boolean;
+  sourceType: UserDatasetSource;
 }
 
 export interface DatasetManifestItem {
@@ -59,6 +62,7 @@ export interface DatasetManifestItem {
   path: string;
   kind: "csv" | "json";
   isSample?: boolean;
+  sourceType: UserDatasetSource;
 }
 
 export interface ParsedDataset {
