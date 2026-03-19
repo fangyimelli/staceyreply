@@ -54,7 +54,9 @@ export default function App() {
   const [tradeState, setTradeState] = useState<ReplayPnLState>(
     createReplayPnLState("auto"),
   );
+  const [chartViewport, setChartViewport] = useState({ startIndex: 0, endIndex: 0 });
   const tradeIdRef = React.useRef(0);
+  const previousBarsLengthRef = React.useRef(0);
 
   useEffect(() => {
     const selectedDataset =
@@ -255,6 +257,44 @@ export default function App() {
     return bars.map((bar) => (prev = bar.close * k + prev * (1 - k)));
   }, [bars]);
   const visibleAnnotations = analysis?.visibleAnnotations ?? [];
+
+  useEffect(() => {
+    if (bars.length === 0) {
+      previousBarsLengthRef.current = 0;
+      setChartViewport({ startIndex: 0, endIndex: 0 });
+      return;
+    }
+
+    setChartViewport((prev) => {
+      const previousLength = previousBarsLengthRef.current;
+      const maxIndex = bars.length - 1;
+      const desiredSize =
+        previousLength > 0
+          ? Math.max(1, Math.min(prev.endIndex - prev.startIndex + 1, bars.length))
+          : Math.min(Math.max(bars.length, 1), 120);
+      const wasFollowingRightEdge =
+        previousLength === 0 || prev.endIndex >= Math.max(previousLength - 2, 0);
+
+      if (wasFollowingRightEdge) {
+        return {
+          startIndex: Math.max(0, bars.length - desiredSize),
+          endIndex: maxIndex,
+        };
+      }
+
+      const startIndex = Math.min(
+        prev.startIndex,
+        Math.max(bars.length - desiredSize, 0),
+      );
+
+      return {
+        startIndex,
+        endIndex: Math.min(startIndex + desiredSize - 1, maxIndex),
+      };
+    });
+
+    previousBarsLengthRef.current = bars.length;
+  }, [bars]);
 
   const selectedDatasetLabel =
     datasets
@@ -546,18 +586,20 @@ export default function App() {
         </div>
       </section>
       <main className="main-grid">
-        <ChartPanel
-          bars={bars}
-          ema20={ema20}
-          annotations={visibleAnnotations}
-          replayMarkerTime={currentReplayTime}
+          <ChartPanel
+            bars={bars}
+            ema20={ema20}
+            annotations={visibleAnnotations}
+            replayMarkerTime={currentReplayTime}
           previousClose={analysis.previousClose}
           hos={analysis.hos}
           los={analysis.los}
-          hod={analysis.hod}
-          lod={analysis.lod}
-          statusBanner={analysis.statusBanner}
-        />
+            hod={analysis.hod}
+            lod={analysis.lod}
+            statusBanner={analysis.statusBanner}
+            viewport={chartViewport}
+            onViewportChange={setChartViewport}
+          />
         <ExplainPanel analysis={{ ...analysis, currentBarIndex }} />
       </main>
       <section className="footer-grid">

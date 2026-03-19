@@ -23,6 +23,9 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
+- Sample mode 直接展示完整 replay 流程
+- 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
+- 圖表有 viewport state，預設追蹤右側最新已揭露 bars，支援滑鼠滾輪縮放與拖曳平移
 - 不串 broker API，只讀本機固定資料夾歷史數據
 - README、sample mode、acceptance checklist generator 持續維護
 
@@ -70,6 +73,14 @@ npm run dev
 - 高週期一律由 1m 原始資料聚合
 - 顯示與 session 邏輯使用 `America/New_York`
 - 若來源為 MT fixed EST，UI 會同時保留 source/raw time 供對照，並以 normalized strategy time 作為主要策略時間
+
+## Chart navigation
+
+- 主圖 X 軸直接顯示 normalized New York 時間字串，而不是 index label
+- tooltip 會保留 normalized time 與 source/raw time，方便檢查 DST 調整前後差異
+- chart viewport 由 React state 管理，會隨 replay 新增 bars 自動追蹤右側最新區段；若使用者已平移離開右側，則保留目前視窗大小與位置
+- 滑鼠滾輪可縮放可見區間長度
+- 滑鼠左鍵拖曳可平移可見區間
 
 ## Replay controls
 

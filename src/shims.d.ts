@@ -9,6 +9,10 @@ declare module 'react' {
   export function useEffect(effect: () => void | (() => void) | Promise<void>, deps?: unknown[]): void;
   export function useMemo<T>(factory: () => T, deps: unknown[]): T;
   export function useState<T>(initialState: T): [T, (value: T | ((prev: T) => T)) => void];
+  export function useCallback<T extends (...args: any[]) => any>(callback: T, deps: unknown[]): T;
+  export function useRef<T>(initialValue: T): { current: T };
+  export type WheelEvent<T = Element> = globalThis.WheelEvent & { currentTarget: T };
+  export type MouseEvent<T = Element> = globalThis.MouseEvent & { currentTarget: T; button: number; clientX: number };
   const React: any;
   export default React;
 }

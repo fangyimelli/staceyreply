@@ -14,22 +14,24 @@ Generated automatically from `scripts/generate-checklist.mjs`.
 - [x] Manual Reply = manual entry / exit + cumulative PnL
 - [x] Support 1m / 5m / 15m / 1h / 4h / 1D
 - [x] Rebuild higher timeframes from 1m
-- [x] Use America/New_York timezone for strategy session logic and display
-- [x] Normalize MT fixed EST source data into America/New_York strategy time without rewriting raw files
-- [x] Render a real candlestick chart
-- [x] Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / strategy annotations
-- [x] Provide a right-side explain panel with rule-based reasoning, trace, and diagnostics
-- [x] Support replay controls: Pause / Auto Replay / Semi Replay / Continue / Reset
-- [x] Support dataset selection followed by trade-day candidate selection from scanned dates
-- [x] Maintain README
-- [x] Maintain sample mode
-- [x] Maintain an auto-generated acceptance checklist
-
-## Planned / pending
-
-- [ ] Upload a single file or folder from the UI
-- [ ] Show date/time labels directly on the chart x-axis
-- [ ] Support mouse-wheel zoom like TradingView
-- [ ] Support drag/pan like TradingView
-- [ ] Replay starts from the day before the selected FRD/FGD date
-
+- [x] Use America/New_York timezone
+- [x] DST normalization keeps raw file unchanged while strategy session aligns to America/New_York
+- [x] Main chart must be a real candlestick chart
+- [x] Candles must have uniform TradingView-like thickness and spacing
+- [x] Chart must clearly display normalized New York date/time on the x-axis
+- [x] Chart viewport state is managed in React and follows revealed replay bars by default
+- [x] Chart must support mouse-wheel zoom like TradingView
+- [x] Chart must support drag/pan like TradingView
+- [x] Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50
+- [x] Right-side explain panel with rule-based reasoning
+- [x] Add expanded explanation documentation
+- [x] Add debug-friendly README
+- [x] Replay Mode similar to TradingView Replay
+- [x] Replay starts from the day before the selected FRD/FGD date
+- [x] Replay can auto-stop at important market/strategy states
+- [x] Replay must auto-pause at key moments and show on-chart state labels
+- [x] Frontend should display only final screened results by default
+- [x] Dataset selection is followed by trade-day candidate selection from scanned dates
+- [x] README
+- [x] Sample mode
+- [x] Auto-generated acceptance checklist
