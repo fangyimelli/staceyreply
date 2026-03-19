@@ -1,11 +1,15 @@
 # Acceptance Checklist
 
-- [x] Load local CSV / JSON OHLCV
-- [x] Load a folder of symbol files
-- [x] Include built-in symbols/datasets for immediate use
-- [x] After upload, analyze and screen FRD / FGD candidate dates first
-- [x] Show detected final candidate dates explicitly
-- [x] In non-auto practice / manual-style review, only show `needs-practice` filtered dates
+Generated automatically from `scripts/generate-checklist.mjs`.
+
+## Completed
+
+- [x] Load local CSV / JSON OHLCV from the fixed dist/mnt/data folder
+- [x] Load a folder of symbol files via startup manifest scanning
+- [x] Include a built-in sample dataset for immediate use
+- [x] Analyze and screen FRD / FGD candidate dates before selecting a trade day
+- [x] Show detected candidate dates explicitly in the UI
+- [x] In non-auto practice / manual-style review, only show `needs-practice` candidate dates
 - [x] Auto Reply = automatic entry / exit + cumulative PnL
 - [x] Manual Reply = manual entry / exit + cumulative PnL
 - [x] Support 1m / 5m / 15m / 1h / 4h / 1D
