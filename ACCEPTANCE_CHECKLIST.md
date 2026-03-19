@@ -14,7 +14,8 @@
 - [x] DST normalization keeps raw file unchanged while strategy session aligns to America/New_York
 - [x] Main chart must be a real candlestick chart
 - [x] Candles must have uniform TradingView-like thickness and spacing
-- [x] Chart must clearly display date/time on the x-axis
+- [x] Chart must clearly display normalized New York date/time on the x-axis
+- [x] Chart viewport state is managed in React and follows revealed replay bars by default
 - [x] Chart must support mouse-wheel zoom like TradingView
 - [x] Chart must support drag/pan like TradingView
 - [x] Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / source / entry / stop / TP30 / TP35 / TP40 / TP50

@@ -16,3 +16,7 @@ button, select { background: #111827; color: #e2e8f0; border: 1px solid #334155;
 .tooltip-card { background: #0f172a; border: 1px solid #334155; padding: 10px; max-width: 320px; }
 code { color: #fde68a; }
 @media (max-width: 1200px) { .main-grid { grid-template-columns: 1fr; } }
+
+.chart-interaction-note { color: #94a3b8; margin-bottom: 8px; }
+.chart-interaction-layer { width: 100%; cursor: grab; user-select: none; }
+.chart-interaction-layer:active { cursor: grabbing; }
