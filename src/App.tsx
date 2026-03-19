@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { loadDatasetManifest, loadParsedDataset } from "./data/loadDatasets";
+import {
+  createUserDatasetManifest,
+  fileToDatasetFile,
+  getBuiltinSampleManifest,
+  loadParsedDataset,
+} from "./data/loadDatasets";
 import { nextStageStop } from "./replay/engine";
 import {
   buildReplayAnalysis,
@@ -13,6 +18,7 @@ import {
 } from "./strategy/pnl";
 import type {
   CandidateTradeDay,
+  DatasetFile,
   DatasetManifestItem,
   ParsedDataset,
   ReplayMode,
@@ -21,12 +27,14 @@ import type {
   Timeframe,
   TradeExecution,
   TradeSide,
+  UserDatasetSource,
 } from "./types/domain";
 import { ChartPanel } from "./ui/ChartPanel";
 import { ExplainPanel } from "./ui/ExplainPanel";
 
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
+const builtinSampleManifest = getBuiltinSampleManifest();
 
 const replayModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
@@ -40,10 +48,30 @@ const formatTradeResult = (trade: TradeExecution | null) => {
   return `${label} ${trade.side.toUpperCase()} ${formatPnL(trade.realizedPnL)}${exitReason}`;
 };
 const resetTradeState = (mode: ReplayPnLState["mode"]) => createReplayPnLState(mode);
+const describeSourceType = (sourceType: UserDatasetSource) => {
+  if (sourceType === "sample") return "Built-in sample";
+  if (sourceType === "single-file") return "User single file";
+  return "User folder batch";
+};
+const datasetLabelText = (dataset: DatasetManifestItem) =>
+  `${dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase()}${
+    dataset.isSample ? " (sample mode)" : ""
+  }`;
+const toDatasetMap = (files: DatasetFile[]) => new Map(files.map((file) => [file.id, file]));
+
+const folderPickerProps = {
+  multiple: true,
+  webkitdirectory: "",
+  directory: "",
+} as const as Record<string, string | boolean>;
 
 export default function App() {
-  const [datasets] = useState<DatasetManifestItem[]>(loadDatasetManifest());
-  const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? "");
+  const [userDatasetFiles, setUserDatasetFiles] = useState<DatasetFile[]>([]);
+  const [isImportingDatasets, setIsImportingDatasets] = useState(false);
+  const [datasetImportMessage, setDatasetImportMessage] = useState(
+    "Use sample mode, choose one CSV/JSON file, or load a folder batch.",
+  );
+  const [datasetId, setDatasetId] = useState(builtinSampleManifest[0]?.id ?? "");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
@@ -58,6 +86,18 @@ export default function App() {
   const tradeIdRef = React.useRef(0);
   const previousBarsLengthRef = React.useRef(0);
 
+  const datasets = useMemo(
+    () => [...builtinSampleManifest, ...createUserDatasetManifest(userDatasetFiles)],
+    [userDatasetFiles],
+  );
+  const datasetFilesById = useMemo(() => toDatasetMap(userDatasetFiles), [userDatasetFiles]);
+
+  useEffect(() => {
+    if (!datasets.some((item) => item.id === datasetId)) {
+      setDatasetId(datasets[0]?.id ?? "");
+    }
+  }, [datasets, datasetId]);
+
   useEffect(() => {
     const selectedDataset =
       datasets.find((item) => item.id === datasetId) ?? datasets[0];
@@ -67,7 +107,7 @@ export default function App() {
     setIsDatasetLoading(true);
     setMode("pause");
 
-    loadParsedDataset(selectedDataset)
+    loadParsedDataset(selectedDataset, datasetFilesById)
       .then((dataset) => {
         if (cancelled) return;
         setActiveDataset(dataset);
@@ -85,7 +125,38 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [datasets, datasetId]);
+  }, [datasetFilesById, datasets, datasetId]);
+
+  const importDatasets = async (
+    files: FileList | File[],
+    sourceType: Exclude<UserDatasetSource, "sample">,
+  ) => {
+    const selectedFiles = Array.from(files);
+    setIsImportingDatasets(true);
+
+    try {
+      const imported = (
+        await Promise.all(selectedFiles.map((file) => fileToDatasetFile(file, sourceType)))
+      ).filter((file): file is DatasetFile => file !== null);
+
+      setUserDatasetFiles(imported);
+
+      if (imported.length > 0) {
+        setDatasetId(imported[0].id);
+        setDatasetImportMessage(
+          `${describeSourceType(sourceType)} loaded: ${imported.length} dataset${
+            imported.length === 1 ? "" : "s"
+          } scanned for Candidate Day 3 dates.`,
+        );
+      } else {
+        setDatasetImportMessage(
+          `No supported CSV/JSON files were found in the ${sourceType === "single-file" ? "selected file" : "selected folder"}.`,
+        );
+      }
+    } finally {
+      setIsImportingDatasets(false);
+    }
+  };
 
   const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
@@ -296,11 +367,8 @@ export default function App() {
     previousBarsLengthRef.current = bars.length;
   }, [bars]);
 
-  const selectedDatasetLabel =
-    datasets
-      .find((item) => item.id === datasetId)
-      ?.label.replace(/\.(csv|json)$/i, "")
-      .toUpperCase() ?? "UNKNOWN";
+  const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0] ?? null;
+  const selectedDatasetLabel = selectedDataset ? datasetLabelText(selectedDataset) : "UNKNOWN";
   const selectedCandidate =
     selectedTradeDayState?.availableTradeDays.find(
       (candidate) => candidate.date === analysis?.selectedTradeDay,
@@ -312,10 +380,46 @@ export default function App() {
         <header>
           <h1>Stacey Reply Replay</h1>
           <p>
-            Fixed-folder data source: <code>staceyreply/dist/mnt/data</code>. No
-            upload UI, no broker API.
+            Built-in sample mode plus local single-file or folder-batch CSV/JSON loading. No broker API.
           </p>
         </header>
+        <section className="upload-grid">
+          <div className="upload-card">
+            <h3>Data source</h3>
+            <p>{datasetImportMessage}</p>
+            <div className="upload-actions">
+              <label>
+                Single file
+                <input
+                  type="file"
+                  accept=".csv,.json"
+                  onChange={(e: any) => {
+                    const files = e.target.files;
+                    if (files?.length) {
+                      void importDatasets(files, "single-file");
+                      e.target.value = "";
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                Folder batch
+                <input
+                  type="file"
+                  accept=".csv,.json"
+                  {...folderPickerProps}
+                  onChange={(e: any) => {
+                    const files = e.target.files;
+                    if (files?.length) {
+                      void importDatasets(files, "folder-batch");
+                      e.target.value = "";
+                    }
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+        </section>
         <section className="control-grid">
           <label>
             Dataset
@@ -327,8 +431,7 @@ export default function App() {
             >
               {datasets.map((dataset) => (
                 <option key={dataset.id} value={dataset.id}>
-                  {dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase()}
-                  {dataset.isSample ? " (sample mode)" : ""}
+                  {datasetLabelText(dataset)}
                 </option>
               ))}
             </select>
@@ -340,23 +443,25 @@ export default function App() {
               onChange={(e: { target: { value: string } }) =>
                 setSelectedTradeDay(e.target.value)
               }
+              disabled
             >
-              {visibleCandidateTradeDays.map((candidate) => (
-                <option key={candidate.date} value={candidate.date}>
-                  {candidate.date} · {candidate.template} · {candidate.valid ? "valid" : "invalid"}
-                </option>
-              ))}
+              <option value="">
+                {activeDataset?.parseStatus === "error"
+                  ? "Dataset scan unavailable"
+                  : "Load and scan a dataset first"}
+              </option>
             </select>
           </label>
         </section>
         <section className="info-strip">
           <div>
-            {isDatasetLoading
+            {isDatasetLoading || isImportingDatasets
               ? "Loading dataset…"
               : activeDataset?.parseStatus === "error"
                 ? "Dataset parse failed."
-                : "No dataset available."}
+                : "Dataset scan pending or unavailable."}
           </div>
+          <div>Dataset source: {selectedDataset ? describeSourceType(selectedDataset.sourceType) : "none"}</div>
           {!isDatasetLoading && activeDataset?.parseStatus === "error" ? (
             <div>
               Why unavailable: {activeDataset.parseErrors[0] ?? "Unknown parse error."}
@@ -370,6 +475,7 @@ export default function App() {
               <ul>
                 <li>Dataset: {selectedDatasetLabel}</li>
                 <li>Dataset file: {activeDataset.sourceLabel}</li>
+                <li>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</li>
                 <li>Parse status: {activeDataset.parseStatus}</li>
                 <li>Failure reasons: {activeDataset.parseErrors.join(" | ")}</li>
                 <li>
@@ -453,10 +559,49 @@ export default function App() {
       <header>
         <h1>Stacey Reply Replay</h1>
         <p>
-          Fixed-folder data source: <code>staceyreply/dist/mnt/data</code>. No
-          upload UI, no broker API.
+          Built-in sample mode plus local single-file or folder-batch CSV/JSON loading. No broker API.
         </p>
       </header>
+      <section className="upload-grid">
+        <div className="upload-card">
+          <h3>Choose local data</h3>
+          <p>{datasetImportMessage}</p>
+          <div className="upload-actions">
+            <label>
+              Single file
+              <input
+                type="file"
+                accept=".csv,.json"
+                onChange={(e: any) => {
+                  const files = e.target.files;
+                  if (files?.length) {
+                    void importDatasets(files, "single-file");
+                    e.target.value = "";
+                  }
+                }}
+              />
+            </label>
+            <label>
+              Folder batch
+              <input
+                type="file"
+                accept=".csv,.json"
+                {...folderPickerProps}
+                onChange={(e: any) => {
+                  const files = e.target.files;
+                  if (files?.length) {
+                    void importDatasets(files, "folder-batch");
+                    e.target.value = "";
+                  }
+                }}
+              />
+            </label>
+          </div>
+          <p className="upload-note">
+            After loading, the app scans the dataset first and then refreshes Candidate Day 3 options.
+          </p>
+        </div>
+      </section>
       <section className="control-grid">
         <label>
           Dataset
@@ -466,8 +611,7 @@ export default function App() {
           >
             {datasets.map((dataset) => (
               <option key={dataset.id} value={dataset.id}>
-                {dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase()}
-                {dataset.isSample ? " (sample mode)" : ""}
+                {datasetLabelText(dataset)}
               </option>
             ))}
           </select>
@@ -478,11 +622,15 @@ export default function App() {
             value={selectedTradeDayState?.selectedTradeDay ?? ""}
             onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)}
           >
-            {visibleCandidateTradeDays.map((candidate) => (
-              <option key={candidate.date} value={candidate.date}>
-                {candidate.date} · {candidate.template} · {candidate.valid ? "valid" : "invalid"}
-              </option>
-            ))}
+            {visibleCandidateTradeDays.length ? (
+              visibleCandidateTradeDays.map((candidate) => (
+                <option key={candidate.date} value={candidate.date}>
+                  {candidate.date} · {candidate.template} · {candidate.valid ? "valid" : "invalid"}
+                </option>
+              ))
+            ) : (
+              <option value="">No scanned candidates for current dataset</option>
+            )}
           </select>
         </label>
         <label>
@@ -563,7 +711,8 @@ export default function App() {
         </button>
       </section>
       <section className="info-strip">
-        <div>Dataset status: {isDatasetLoading ? "loading" : "ready"}</div>
+        <div>Dataset status: {isDatasetLoading || isImportingDatasets ? "loading" : "ready"}</div>
+        <div>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</div>
         <div>Parse status: {activeDataset.parseStatus}</div>
         <div>Trade day: {analysis.selectedTradeDay}</div>
         <div>Candidate summary: {selectedCandidate?.summaryReason ?? "none"}</div>
@@ -586,20 +735,20 @@ export default function App() {
         </div>
       </section>
       <main className="main-grid">
-          <ChartPanel
-            bars={bars}
-            ema20={ema20}
-            annotations={visibleAnnotations}
-            replayMarkerTime={currentReplayTime}
+        <ChartPanel
+          bars={bars}
+          ema20={ema20}
+          annotations={visibleAnnotations}
+          replayMarkerTime={currentReplayTime}
           previousClose={analysis.previousClose}
           hos={analysis.hos}
           los={analysis.los}
-            hod={analysis.hod}
-            lod={analysis.lod}
-            statusBanner={analysis.statusBanner}
-            viewport={chartViewport}
-            onViewportChange={setChartViewport}
-          />
+          hod={analysis.hod}
+          lod={analysis.lod}
+          statusBanner={analysis.statusBanner}
+          viewport={chartViewport}
+          onViewportChange={setChartViewport}
+        />
         <ExplainPanel analysis={{ ...analysis, currentBarIndex }} />
       </main>
       <section className="footer-grid">
@@ -639,6 +788,7 @@ export default function App() {
           <h3>Diagnostics</h3>
           <ul>
             <li>Dataset file: {activeDataset.sourceLabel}</li>
+            <li>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</li>
             <li>Bars loaded: {activeDataset.bars1m.length}</li>
             <li>Parse errors: {activeDataset.parseErrors.join(" | ") || "none"}</li>
             <li>Accepted formats / notes: {activeDataset.parseDiagnostics.join(" | ") || "none"}</li>

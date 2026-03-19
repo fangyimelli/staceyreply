@@ -20,3 +20,10 @@ code { color: #fde68a; }
 .chart-interaction-note { color: #94a3b8; margin-bottom: 8px; }
 .chart-interaction-layer { width: 100%; cursor: grab; user-select: none; }
 .chart-interaction-layer:active { cursor: grabbing; }
+
+.upload-grid { display: grid; gap: 12px; }
+.upload-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 12px; }
+.upload-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.upload-actions label { display: grid; gap: 6px; min-width: 220px; }
+.upload-note { color: #94a3b8; margin: 0; }
+input[type="file"] { background: #111827; color: #e2e8f0; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; }

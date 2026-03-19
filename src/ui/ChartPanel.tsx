@@ -227,7 +227,7 @@ export function ChartPanel({
   );
 
   const handleWheel = useCallback(
-    (event: React.WheelEvent<HTMLDivElement>) => {
+    (event: any) => {
       event.preventDefault();
       const rect = chartRef.current?.getBoundingClientRect();
       const anchorRatio = rect ? (event.clientX - rect.left) / rect.width : 0.5;
@@ -237,7 +237,7 @@ export function ChartPanel({
   );
 
   const handleMouseDown = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
+    (event: any) => {
       if (event.button !== 0) return;
       dragStateRef.current = {
         startX: event.clientX,
@@ -252,7 +252,7 @@ export function ChartPanel({
   }, []);
 
   const handleMouseMove = useCallback(
-    (event: React.MouseEvent<HTMLDivElement>) => {
+    (event: any) => {
       const dragState = dragStateRef.current;
       const width = chartRef.current?.clientWidth ?? 0;
       if (!dragState || width <= 0 || data.length <= visibleCount) return;
