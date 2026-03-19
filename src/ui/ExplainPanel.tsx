@@ -49,6 +49,12 @@ export function ExplainPanel({ analysis }: { analysis: ReplayAnalysis }) {
     visibleTraceMap.set(traceKey(trace), trace),
   );
   const visibleTraces = [...visibleTraceMap.values()];
+  const unlockedTarget = analysis.targetLevels
+    .filter((level) => level.eligible)
+    .slice(-1)[0];
+  const nextLockedTarget = analysis.targetLevels.find(
+    (level) => !level.eligible,
+  );
 
   return (
     <aside className="explain-shell">
@@ -66,6 +72,14 @@ export function ExplainPanel({ analysis }: { analysis: ReplayAnalysis }) {
             {analysis.recommendedTarget
               ? `TP${analysis.recommendedTarget}`
               : "n/a"}
+          </li>
+          <li>
+            Current unlocked tier:{" "}
+            {unlockedTarget ? `TP${unlockedTarget.tier}` : "none"}
+          </li>
+          <li>
+            Next upgrade gate:{" "}
+            {nextLockedTarget?.missingGate ?? "All target tiers are unlocked."}
           </li>
           <li>lastReplyEval: {analysis.lastReplyEval.explanation}</li>
           <li>
@@ -102,6 +116,16 @@ export function ExplainPanel({ analysis }: { analysis: ReplayAnalysis }) {
       </section>
       <section>
         <h3>Missing Conditions</h3>
+        <p>
+          Current target tier status:{" "}
+          {unlockedTarget
+            ? `Unlocked through TP${unlockedTarget.tier}.`
+            : "No target tier unlocked yet."}
+        </p>
+        <p>
+          Next target gate:{" "}
+          {nextLockedTarget?.missingGate ?? "All target tiers are unlocked."}
+        </p>
         <ul>
           {(analysis.invalidReasons.length
             ? analysis.invalidReasons

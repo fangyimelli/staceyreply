@@ -923,14 +923,87 @@ export const buildReplayDatasetAnalysis = (
     }
   }
 
-  const targetLevels: TradeLevel[] = [30, 35, 40, 50].map((tier) => {
+  const entryReady = entryIndex !== -1 && entryPrice !== undefined;
+  const stopHuntConfirmed = stopHuntIndex !== -1;
+  const pattern123Ready = p1 !== -1;
+  const emaConfirmed = emaIndex !== -1;
+  const maxFavorablePips = entryReady
+    ? bars1m.slice(entryIndex).reduce((maxMove, bar) => {
+        const move =
+          template === "FGD"
+            ? pips(bar.high - (entryPrice ?? 0))
+            : pips((entryPrice ?? 0) - bar.low);
+        return Math.max(maxMove, move);
+      }, 0)
+    : 0;
+  const engulfmentReady = false;
+  // NOTE: The current engine does not model a dedicated engulfment rule yet.
+  // To avoid silently inventing one, TP40 only unlocks from the explicit
+  // stop-hunt branch already tracked in strategy state.
+  const tp30Eligible = entryReady && maxFavorablePips >= 15;
+  const tp35Eligible = entryReady && maxFavorablePips >= 30;
+  const tp40Eligible =
+    entryReady &&
+    maxFavorablePips >= 30 &&
+    (stopHuntConfirmed || engulfmentReady);
+  const tp50Eligible =
+    entryReady &&
+    stopHuntConfirmed &&
+    pattern123Ready &&
+    emaConfirmed &&
+    maxFavorablePips >= 35;
+
+  const tierReason = (tier: 30 | 35 | 40 | 50) =>
+    tier === 30
+      ? "Requires entry plus source/20EMA base state and move30 >= 15."
+      : tier === 35
+        ? "Requires TP35 upgrade: move30 >= 30."
+        : tier === 40
+          ? "Requires TP40 upgrade: move30 >= 30 plus stop hunt or engulfment."
+          : "Requires TP50 upgrade: stop hunt + 123 + 20EMA + move30 >= 35.";
+
+  const targetLevels: TradeLevel[] = ([30, 35, 40, 50] as const).map((tier) => {
     const price =
       entryPrice === undefined
         ? 0
         : template === "FGD"
           ? entryPrice + tier * 0.0001
           : entryPrice - tier * 0.0001;
+    const eligible =
+      tier === 30
+        ? tp30Eligible
+        : tier === 35
+          ? tp35Eligible
+          : tier === 40
+            ? tp40Eligible
+            : tp50Eligible;
+    const missingGate = !entryReady
+      ? "Entry gate is still locked."
+      : tier === 30
+        ? maxFavorablePips >= 15
+          ? undefined
+          : `Need move30 >= 15; current favorable move is ${maxFavorablePips} pips.`
+        : tier === 35
+          ? maxFavorablePips >= 30
+            ? undefined
+            : `Need TP35 upgrade (move30 >= 30); current favorable move is ${maxFavorablePips} pips.`
+          : tier === 40
+            ? maxFavorablePips < 30
+              ? `Need TP40 upgrade move30 >= 30; current favorable move is ${maxFavorablePips} pips.`
+              : stopHuntConfirmed
+                ? undefined
+                : "Need TP40 upgrade gate: confirmed stop hunt (engulfment rule not modeled in current engine)."
+            : maxFavorablePips < 35
+              ? `Need TP50 upgrade move30 >= 35; current favorable move is ${maxFavorablePips} pips.`
+              : !stopHuntConfirmed
+                ? "Need TP50 upgrade gate: confirmed stop hunt."
+                : !pattern123Ready
+                  ? "Need TP50 upgrade gate: confirmed 1-2-3 structure."
+                  : !emaConfirmed
+                    ? "Need TP50 upgrade gate: 20EMA confirmation."
+                    : undefined;
     const hit =
+      eligible &&
       entryIndex !== -1 &&
       bars1m
         .slice(entryIndex)
@@ -938,20 +1011,24 @@ export const buildReplayDatasetAnalysis = (
           template === "FGD" ? bar.high >= price : bar.low <= price,
         );
     return {
-      tier: tier as 30 | 35 | 40 | 50,
+      tier,
       price,
+      eligible,
       hit,
-      reason:
-        tier === 30
-          ? "Requires source + 20EMA + move30 >= 15."
-          : tier === 35
-            ? "Requires move30 >= 30."
-            : tier === 40
-              ? "Requires move30 >= 30 plus stop hunt or engulfment."
-              : "Requires stop hunt + 123 + 20EMA + move30 >= 35.",
+      status: hit
+        ? "hit"
+        : eligible
+          ? "eligible"
+          : entryReady
+            ? "blocked"
+            : "pending",
+      reason: tierReason(tier),
+      missingGate,
     };
   });
-  const hitTier = targetLevels.filter((level) => level.hit).slice(-1)[0]?.tier;
+  const recommendedTarget = targetLevels
+    .filter((level) => level.eligible)
+    .slice(-1)[0]?.tier;
   targetLevels.forEach((level) => {
     if (entryIndex !== -1)
       annotations.push(
@@ -965,22 +1042,21 @@ export const buildReplayDatasetAnalysis = (
           [],
         ),
       );
-    const highestHit =
-      targetLevels.filter((target) => target.hit).slice(-1)[0]?.tier ?? 0;
-    const gatePassed =
-      entryIndex !== -1 && (level.tier === 30 || highestHit >= level.tier);
     const trace = [
       {
         ruleName: `Target tier TP${level.tier}`,
         timeframe: "1m",
-        passed: gatePassed,
-        reason: gatePassed
-          ? `TP${level.tier} is available because price has already met or exceeded that target tier.`
-          : `TP${level.tier} not upgraded yet — ${level.reason}`,
+        passed: level.eligible,
+        reason: level.hit
+          ? `TP${level.tier} is eligible and has been hit.`
+          : level.eligible
+            ? `TP${level.tier} is unlocked and waiting for price to hit ${level.price.toFixed(4)}.`
+            : `TP${level.tier} remains locked — ${level.missingGate ?? level.reason}`,
         prices: {
           entry: entryPrice ?? 0,
           target: level.price,
-          highestHitTier: highestHit,
+          maxFavorablePips,
+          eligible: level.eligible ? 1 : 0,
         },
         times: {
           entryBar: entryIndex !== -1 ? strategyTime(bars1m[entryIndex]) : "",
@@ -993,7 +1069,11 @@ export const buildReplayDatasetAnalysis = (
       ruleTrace,
       makeEvent(
         "management",
-        gatePassed ? `TP${level.tier} available` : `TP${level.tier} pending`,
+        level.hit
+          ? `TP${level.tier} hit`
+          : level.eligible
+            ? `TP${level.tier} unlocked`
+            : `TP${level.tier} locked`,
         `Target tier TP${level.tier} reviewed.`,
         trace[0].reason,
         entryIndex !== -1 ? entryIndex : replayStartIndex,
@@ -1060,7 +1140,122 @@ export const buildReplayDatasetAnalysis = (
     hod: Number.isFinite(hod) ? hod : undefined,
     lod: Number.isFinite(lod) ? lod : undefined,
     targetLevels,
-    recommendedTarget: hitTier ?? (entryIndex !== -1 ? 30 : undefined),
+    recommendedTarget,
+  };
+};
+
+const resolveCurrentTargetLevels = (
+  analysis: ReplayDatasetAnalysis,
+  currentBarIndex: number,
+): {
+  targetLevels: TradeLevel[];
+  recommendedTarget?: 30 | 35 | 40 | 50;
+} => {
+  const bars1m = analysis.timeframeBars["1m"];
+  const entryEvent = analysis.eventLog.find(
+    (event) => event.stage === "entry" && event.title === "Entry valid",
+  );
+  const entryIndex =
+    entryEvent && entryEvent.visibleFromIndex <= currentBarIndex
+      ? entryEvent.visibleFromIndex
+      : -1;
+  const entryReady = entryIndex !== -1 && analysis.entryPrice !== undefined;
+  const stopHuntConfirmed = analysis.eventLog.some(
+    (event) =>
+      event.stage === "stop-hunt" &&
+      event.title === "Stop hunt confirmed" &&
+      event.visibleFromIndex <= currentBarIndex,
+  );
+  const pattern123Ready = analysis.eventLog.some(
+    (event) =>
+      event.stage === "pattern-123" &&
+      event.title === "123 structure ready" &&
+      event.visibleFromIndex <= currentBarIndex,
+  );
+  const emaConfirmed = analysis.eventLog.some(
+    (event) =>
+      event.stage === "ema" &&
+      event.title === "20EMA confirm" &&
+      event.visibleFromIndex <= currentBarIndex,
+  );
+  const visibleBars =
+    entryReady && analysis.entryPrice !== undefined
+      ? bars1m.slice(entryIndex, currentBarIndex + 1)
+      : [];
+  const maxFavorablePips = visibleBars.reduce((maxMove, bar) => {
+    const move =
+      analysis.template === "FGD"
+        ? pips(bar.high - (analysis.entryPrice ?? 0))
+        : pips((analysis.entryPrice ?? 0) - bar.low);
+    return Math.max(maxMove, move);
+  }, 0);
+
+  const targetLevels = analysis.targetLevels.map((level) => {
+    const eligible = !entryReady
+      ? false
+      : level.tier === 30
+        ? maxFavorablePips >= 15
+        : level.tier === 35
+          ? maxFavorablePips >= 30
+          : level.tier === 40
+            ? maxFavorablePips >= 30 && stopHuntConfirmed
+            : maxFavorablePips >= 35 &&
+              stopHuntConfirmed &&
+              pattern123Ready &&
+              emaConfirmed;
+    const missingGate = !entryReady
+      ? "Entry gate is still locked."
+      : level.tier === 30
+        ? maxFavorablePips >= 15
+          ? undefined
+          : `Need move30 >= 15; current favorable move is ${maxFavorablePips} pips.`
+        : level.tier === 35
+          ? maxFavorablePips >= 30
+            ? undefined
+            : `Need TP35 upgrade (move30 >= 30); current favorable move is ${maxFavorablePips} pips.`
+          : level.tier === 40
+            ? maxFavorablePips < 30
+              ? `Need TP40 upgrade move30 >= 30; current favorable move is ${maxFavorablePips} pips.`
+              : stopHuntConfirmed
+                ? undefined
+                : "Need TP40 upgrade gate: confirmed stop hunt (engulfment rule not modeled in current engine)."
+            : maxFavorablePips < 35
+              ? `Need TP50 upgrade move30 >= 35; current favorable move is ${maxFavorablePips} pips.`
+              : !stopHuntConfirmed
+                ? "Need TP50 upgrade gate: confirmed stop hunt."
+                : !pattern123Ready
+                  ? "Need TP50 upgrade gate: confirmed 1-2-3 structure."
+                  : !emaConfirmed
+                    ? "Need TP50 upgrade gate: 20EMA confirmation."
+                    : undefined;
+    const hit =
+      eligible &&
+      visibleBars.some((bar) =>
+        analysis.template === "FGD"
+          ? bar.high >= level.price
+          : bar.low <= level.price,
+      );
+    const status: TradeLevel["status"] = hit
+      ? "hit"
+      : eligible
+        ? "eligible"
+        : entryReady
+          ? "blocked"
+          : "pending";
+    return {
+      ...level,
+      eligible,
+      hit,
+      status,
+      missingGate,
+    };
+  });
+
+  return {
+    targetLevels,
+    recommendedTarget: targetLevels
+      .filter((level) => level.eligible)
+      .slice(-1)[0]?.tier,
   };
 };
 
@@ -1069,6 +1264,7 @@ export const buildReplayAnalysis = (
   currentBarIndex: number,
 ): ReplayAnalysis => ({
   ...datasetAnalysis,
+  ...resolveCurrentTargetLevels(datasetAnalysis, currentBarIndex),
   ...resolveReplayVisibility(datasetAnalysis, currentBarIndex),
 });
 
