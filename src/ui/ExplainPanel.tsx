@@ -1,4 +1,10 @@
-import type { OhlcvBar, ReplayAnalysis, RuleTraceItem } from "../types/domain";
+import type {
+  OhlcvBar,
+  ReplayAnalysis,
+  ReplayPnLState,
+  RuleTraceItem,
+  TradeEntrySemantics,
+} from "../types/domain";
 import { toNyLabel } from "../strategy/engine";
 
 const SESSION_RULE_PATTERN =
@@ -34,8 +40,29 @@ const ruleTimeSemantics = (trace: RuleTraceItem) => {
 
 const traceKey = (trace: RuleTraceItem) =>
   `${trace.ruleName}-${trace.timeframe}-${trace.reason}-${JSON.stringify(trace.times)}-${JSON.stringify(trace.prices)}`;
+const formatPrice = (value?: number) =>
+  value === undefined || Number.isNaN(value) ? "n/a" : value.toFixed(4);
+const entrySemanticsLabel = (semantics: TradeEntrySemantics) => {
+  if (semantics === "strategy-entry") return "strategy entry";
+  if (semantics === "manual-execution-user") return "manual execution price";
+  return "current bar close";
+};
 
-export function ExplainPanel({ analysis }: { analysis: ReplayAnalysis }) {
+export function ExplainPanel({
+  analysis,
+  tradeState,
+  manualEntrySummary,
+  entryGateOpen,
+  pendingEntrySemantics,
+  pendingEntryPrice,
+}: {
+  analysis: ReplayAnalysis;
+  tradeState: ReplayPnLState;
+  manualEntrySummary: string;
+  entryGateOpen: boolean;
+  pendingEntrySemantics: TradeEntrySemantics;
+  pendingEntryPrice?: number;
+}) {
   const visibleEvents = analysis.eventLog.filter(
     (event) => event.visibleFromIndex <= analysis.currentBarIndex,
   );
@@ -82,6 +109,12 @@ export function ExplainPanel({ analysis }: { analysis: ReplayAnalysis }) {
             {nextLockedTarget?.missingGate ?? "All target tiers are unlocked."}
           </li>
           <li>lastReplyEval: {analysis.lastReplyEval.explanation}</li>
+          <li>Manual entry UI: {manualEntrySummary}</li>
+          <li>Entry gate open: {entryGateOpen ? "true" : "false"}</li>
+          <li>Pending entry basis: {entrySemanticsLabel(pendingEntrySemantics)} @ {formatPrice(pendingEntryPrice)}</li>
+          <li>Strategy entry: {formatPrice(analysis.entryPrice)}</li>
+          <li>Manual execution price: {formatPrice(tradeState.currentPosition?.manualExecutionPrice ?? pendingEntryPrice)}</li>
+          <li>Trade PnL basis entry: {formatPrice(tradeState.currentPosition?.entryPrice ?? pendingEntryPrice ?? analysis.entryPrice)}</li>
           <li>
             Source time semantics: MT fixed EST / UTC-5 / no DST when
             applicable; otherwise use imported source timestamp as-is.

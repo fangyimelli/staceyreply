@@ -21,6 +21,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
 - Candidate list filter 可獨立切換 `Show all scanned days` / `Show needs-practice only`，不再綁定 replay 播放模式
 - Manual Reply 明確提供 Enter Long / Enter Short / Exit / Reset Trade，且 entry gate 直接綁定 `analysis.lastReplyEval`
+- Manual Reply 的 entry 語義已統一：可明確選擇使用 strategy-confirmed `analysis.entryPrice`、user-specified execution price、或 current bar close；Explain Panel / Trade ledger / Diagnostics 會分開顯示 strategy entry 與 manual execution price，並讓 target ladder / stop distance / cumulative PnL 對齊同一組 entry basis
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - 新增 Debug Page，集中顯示策略流程參數、stage health、target state 與 needs-debug 清單
