@@ -33,10 +33,13 @@ const makeAnnotation = (kind: Annotation['kind'], index: number, barTime: string
 const resolveReplayVisibility = (analysis: ReplayDatasetAnalysis, currentBarIndex: number): ReplayVisibility => {
   const visibleEvents = analysis.eventLog.filter((event) => event.visibleFromIndex <= currentBarIndex);
   const visibleAnnotations = analysis.annotations.filter((annotation) => annotation.visibleFromIndex <= currentBarIndex);
-  const canEnter = analysis.eventLog.some((event) => event.stage === 'entry' && event.title === 'Entry valid');
-  const stage = visibleEvents.slice(-1)[0]?.stage ?? (analysis.invalidReasons.length ? 'invalid' : 'background');
-  const statusBanner = analysis.invalidReasons[0] ?? visibleEvents.slice(-1)[0]?.statusBanner ?? 'Replay ready';
+  const latestVisibleEvent = visibleEvents.slice(-1)[0];
+  const latestVisibleEntryEvent = visibleEvents.filter((event) => event.stage === 'entry').slice(-1)[0];
+  const canEnter = latestVisibleEntryEvent?.title === 'Entry valid';
+  const stage = latestVisibleEvent?.stage ?? (analysis.invalidReasons.length ? 'invalid' : 'background');
+  const statusBanner = analysis.invalidReasons[0] ?? latestVisibleEvent?.statusBanner ?? 'Replay ready';
   const currentReasoning = visibleEvents.slice(-3).map((event) => event.detail);
+  const waitingForGate = analysis.missingConditions[0] ?? analysis.invalidReasons[0] ?? 'Waiting for next gate.';
 
   if (!canEnter && !analysis.invalidReasons.length) {
     currentReasoning.push('Waiting for source → stop hunt → 123 → 20EMA → entry gate sequence.');
@@ -53,7 +56,7 @@ const resolveReplayVisibility = (analysis: ReplayDatasetAnalysis, currentBarInde
     lastReplyEval: {
       stage,
       canReply: canEnter,
-      explanation: canEnter ? 'Entry gate is open.' : analysis.missingConditions[0] ?? analysis.invalidReasons[0] ?? 'Waiting for next gate.',
+      explanation: canEnter ? 'Current replay marker has unlocked the entry gate.' : latestVisibleEvent?.detail ?? waitingForGate,
     },
   };
 };

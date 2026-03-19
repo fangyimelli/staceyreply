@@ -137,8 +137,8 @@ export default function App() {
       <div>Parse status: {activeDataset.parseStatus}</div>
       <div>Trade day: {analysis.selectedTradeDay}</div>
       <div>Current stage: {analysis.stage}</div>
-      <div>Can reply: {analysis.lastReplyEval.canReply ? 'Yes' : 'No'}</div>
-      <div>Gate: {analysis.lastReplyEval.explanation}</div>
+      <div>Can reply now: {analysis.lastReplyEval.canReply ? 'Yes' : 'No'}</div>
+      <div>Current gate: {analysis.lastReplyEval.explanation}</div>
     </section>
     <main className="main-grid">
       <ChartPanel bars={bars} ema20={ema20} annotations={visibleAnnotations} replayMarkerTime={currentReplayTime} previousClose={analysis.previousClose} hos={analysis.hos} los={analysis.los} hod={analysis.hod} lod={analysis.lod} statusBanner={analysis.statusBanner} />
