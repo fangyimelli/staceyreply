@@ -26,6 +26,7 @@ import type {
   SelectedTradeDayState,
   Timeframe,
   TradeExecution,
+  TradeEntrySemantics,
   TradeSide,
   UserDatasetSource,
 } from "./types/domain";
@@ -37,11 +38,20 @@ const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
 const builtinSampleManifest = getBuiltinSampleManifest();
 
-const replayModeLabel = (mode: ReplayPnLState["mode"]) =>
+const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
 const tradeSideForTemplate = (template?: string): TradeSide | null =>
   template === "FGD" ? "long" : template === "FRD" ? "short" : null;
 const formatPnL = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
+const formatPrice = (value?: number) =>
+  value === undefined || Number.isNaN(value) ? "n/a" : value.toFixed(4);
+const manualEntryModeOptions = ["strategy", "user", "close"] as const;
+type ManualEntryMode = (typeof manualEntryModeOptions)[number];
+const entrySemanticsLabel = (semantics: TradeEntrySemantics) => {
+  if (semantics === "strategy-entry") return "Strategy entry";
+  if (semantics === "manual-execution-user") return "Manual execution price";
+  return "Current bar close";
+};
 const formatTradeResult = (trade: TradeExecution | null) => {
   if (!trade) return "No closed trade yet.";
   const label = trade.result ? trade.result.toUpperCase() : "OPEN";
@@ -84,6 +94,7 @@ export default function App() {
   const [tradeState, setTradeState] = useState<ReplayPnLState>(
     createReplayPnLState("auto"),
   );
+  const [practiceFilterEnabled, setPracticeFilterEnabled] = useState(false);
   const [chartViewport, setChartViewport] = useState({ startIndex: 0, endIndex: 0 });
   const tradeIdRef = useRef(0);
   const previousBarsLengthRef = useRef(0);
@@ -190,14 +201,16 @@ export default function App() {
     };
   }, [activeDataset, selectedTradeDay]);
 
+  const isPracticeMode = tradeState.mode === "manual" || practiceFilterEnabled;
+
   const visibleCandidateTradeDays = useMemo<CandidateTradeDay[]>(() => {
     const candidates = selectedTradeDayState?.availableTradeDays ?? [];
-    return mode === "auto"
-      ? candidates
-      : candidates.filter(
+    return isPracticeMode
+      ? candidates.filter(
           (candidate) => candidate.practiceStatus === "needs-practice",
-        );
-  }, [mode, selectedTradeDayState]);
+        )
+      : candidates;
+  }, [isPracticeMode, selectedTradeDayState]);
 
   const analysis = useMemo(() => {
     if (!datasetAnalysis) return null;
@@ -211,20 +224,26 @@ export default function App() {
   }, [activeDataset?.datasetId, analysis?.replayStartIndex, analysis?.selectedTradeDay]);
 
   useEffect(() => {
-    const nextTradeDay = visibleCandidateTradeDays[0]?.date ?? "";
     if (!selectedTradeDayState) return;
+
+    const explicitSelection = selectedTradeDay;
     if (
-      selectedTradeDayState.selectedTradeDay &&
-      visibleCandidateTradeDays.some(
-        (candidate) => candidate.date === selectedTradeDayState.selectedTradeDay,
+      explicitSelection &&
+      selectedTradeDayState.availableTradeDays.some(
+        (candidate) => candidate.date === explicitSelection,
       )
     ) {
       return;
     }
+
+    const nextTradeDay = visibleCandidateTradeDays[0]?.date
+      ?? selectedTradeDayState.availableTradeDays[0]?.date
+      ?? "";
+
     if (nextTradeDay !== selectedTradeDayState.selectedTradeDay) {
       setSelectedTradeDay(nextTradeDay);
     }
-  }, [selectedTradeDayState, visibleCandidateTradeDays]);
+  }, [selectedTradeDay, selectedTradeDayState, visibleCandidateTradeDays]);
 
   const getAdvanceTarget = (barIndex: number) => {
     if (!analysis) return barIndex;
@@ -301,6 +320,8 @@ export default function App() {
             mode: "auto",
             side,
             entryPrice: analysis.entryPrice,
+            strategyEntryPrice: analysis.entryPrice,
+            entrySemantics: "strategy-entry",
             entryBarIndex: currentBarIndex,
             entryTime: bar.time,
             cumulativePnL: prev.cumulativePnL,
@@ -539,7 +560,7 @@ export default function App() {
     );
   }
 
-  const setTradeMode = (nextMode: ReplayPnLState["mode"]) => {
+  const setReplyMode = (nextMode: ReplayPnLState["mode"]) => {
     setTradeState(resetTradeState(nextMode));
   };
   const resetReplay = () => {
@@ -562,11 +583,90 @@ export default function App() {
     tradeState.currentPosition !== null ||
     !analysis.lastReplyEval.canReply;
   const manualSide = tradeSideForTemplate(analysis.template);
+  const entryGateOpen = analysis.visibleEvents.some(
+    (event) =>
+      event.stage === "entry" &&
+      event.title === "Entry valid" &&
+      event.visibleFromIndex <= currentBarIndex,
+  );
+  const current1mBar = analysis.timeframeBars["1m"][currentBarIndex];
+  const parsedManualEntryInput = Number(manualEntryInput);
+  const hasManualEntryInput =
+    manualEntryInput.trim().length > 0 && Number.isFinite(parsedManualEntryInput);
+  const resolvedEntryConfig = (() => {
+    if (tradeState.mode !== "manual" || manualEntryMode === "strategy") {
+      return {
+        entryPrice: analysis.entryPrice,
+        strategyEntryPrice: analysis.entryPrice,
+        entrySemantics: "strategy-entry" as const,
+      };
+    }
+    if (manualEntryMode === "user") {
+      return hasManualEntryInput
+        ? {
+            entryPrice: parsedManualEntryInput,
+            strategyEntryPrice: analysis.entryPrice,
+            manualExecutionPrice: parsedManualEntryInput,
+            entrySemantics: "manual-execution-user" as const,
+          }
+        : {
+            entryPrice: undefined,
+            strategyEntryPrice: analysis.entryPrice,
+            manualExecutionPrice: undefined,
+            entrySemantics: "manual-execution-user" as const,
+          };
+    }
+    return {
+      entryPrice: current1mBar?.close,
+      strategyEntryPrice: analysis.entryPrice,
+      manualExecutionPrice: current1mBar?.close,
+      entrySemantics: "manual-execution-close" as const,
+    };
+  })();
+  const manualEntryPriceReady = resolvedEntryConfig.entryPrice !== undefined;
+  const manualEntryConfigSummary =
+    manualEntryMode === "strategy"
+      ? `Strategy-confirmed entry ${formatPrice(analysis.entryPrice)}.`
+      : manualEntryMode === "user"
+        ? `User-specified execution price ${hasManualEntryInput ? formatPrice(parsedManualEntryInput) : "required"}.`
+        : `Current 1m bar close ${formatPrice(current1mBar?.close)}.`;
+  const activeEntryReferencePrice =
+    tradeState.currentPosition?.entryPrice ??
+    resolvedEntryConfig.entryPrice ??
+    analysis.entryPrice;
+  const effectiveTargetLevels = analysis.targetLevels.map((level) => {
+    const price =
+      activeEntryReferencePrice === undefined
+        ? level.price
+        : manualSide === "long"
+          ? activeEntryReferencePrice + level.tier * 0.0001
+          : manualSide === "short"
+            ? activeEntryReferencePrice - level.tier * 0.0001
+            : level.price;
+    const hit =
+      level.eligible && current1mBar
+        ? manualSide === "long"
+          ? current1mBar.high >= price
+          : manualSide === "short"
+            ? current1mBar.low <= price
+            : level.hit
+        : level.hit;
+    return {
+      ...level,
+      price,
+      hit,
+      status: hit ? "hit" : level.status === "pending" ? "pending" : level.eligible ? "eligible" : "blocked",
+    };
+  });
+  const effectiveStopDistance =
+    analysis.stopPrice !== undefined && activeEntryReferencePrice !== undefined
+      ? Math.abs(activeEntryReferencePrice - analysis.stopPrice)
+      : undefined;
 
   const openManualTrade = (side: TradeSide) => {
     const bar = analysis.timeframeBars["1m"][currentBarIndex];
     if (!bar || tradeState.mode !== "manual" || tradeState.currentPosition) return;
-    if (!analysis.lastReplyEval.canReply) return;
+    if (!analysis.lastReplyEval.canReply || !entryGateOpen || !manualEntryPriceReady) return;
     tradeIdRef.current += 1;
     setTradeState((prev) => ({
       ...prev,
@@ -574,7 +674,10 @@ export default function App() {
         id: `manual-${tradeIdRef.current}`,
         mode: "manual",
         side,
-        entryPrice: bar.close,
+        entryPrice: resolvedEntryConfig.entryPrice!,
+        strategyEntryPrice: resolvedEntryConfig.strategyEntryPrice,
+        manualExecutionPrice: resolvedEntryConfig.manualExecutionPrice,
+        entrySemantics: resolvedEntryConfig.entrySemantics,
         entryBarIndex: currentBarIndex,
         entryTime: bar.time,
         cumulativePnL: prev.cumulativePnL,
@@ -720,15 +823,27 @@ export default function App() {
           </select>
         </label>
         <label>
-          Reply mode
+          Trade / practice mode
           <select
             value={tradeState.mode}
             onChange={(e: { target: { value: string } }) =>
-              setTradeMode(e.target.value as ReplayPnLState["mode"])
+              setReplyMode(e.target.value as ReplayPnLState["mode"])
             }
           >
             <option value="auto">Auto Reply</option>
             <option value="manual">Manual Reply</option>
+          </select>
+        </label>
+        <label>
+          Candidate list filter
+          <select
+            value={practiceFilterEnabled ? "needs-practice" : "all"}
+            onChange={(e: { target: { value: string } }) =>
+              setPracticeFilterEnabled(e.target.value === "needs-practice")
+            }
+          >
+            <option value="all">Show all scanned days</option>
+            <option value="needs-practice">Show needs-practice only</option>
           </select>
         </label>
         <label>
@@ -752,13 +867,13 @@ export default function App() {
       <section className="control-grid">
         <button
           onClick={() => openManualTrade("long")}
-          disabled={manualTradeDisabled || manualSide === "short"}
+          disabled={manualTradeDisabled || manualSide === "short" || !entryGateOpen || !manualEntryPriceReady}
         >
           Enter Long
         </button>
         <button
           onClick={() => openManualTrade("short")}
-          disabled={manualTradeDisabled || manualSide === "long"}
+          disabled={manualTradeDisabled || manualSide === "long" || !entryGateOpen || !manualEntryPriceReady}
         >
           Enter Short
         </button>
@@ -771,6 +886,38 @@ export default function App() {
         <button onClick={() => setTradeState((prev) => resetTradeState(prev.mode))}>
           Reset Trade
         </button>
+        <label>
+          Manual entry basis
+          <select
+            value={manualEntryMode}
+            onChange={(e: { target: { value: string } }) =>
+              setManualEntryMode(e.target.value as ManualEntryMode)
+            }
+            disabled={tradeState.mode !== "manual" || tradeState.currentPosition !== null}
+          >
+            {manualEntryModeOptions.map((option) => (
+              <option key={option} value={option}>
+                {option === "strategy"
+                  ? "Strategy entry"
+                  : option === "user"
+                    ? "User-specified price"
+                    : "Current bar close"}
+              </option>
+            ))}
+          </select>
+        </label>
+        {manualEntryMode === "user" ? (
+          <label>
+            Manual execution price
+            <input
+              type="number"
+              step="0.0001"
+              value={manualEntryInput}
+              onChange={(e: { target: { value: string } }) => setManualEntryInput(e.target.value)}
+              disabled={tradeState.mode !== "manual" || tradeState.currentPosition !== null}
+            />
+          </label>
+        ) : null}
       </section>
       <section className="info-strip">
         <div>Dataset status: {isDatasetLoading || isImportingDatasets ? "loading" : "ready"}</div>
@@ -781,10 +928,11 @@ export default function App() {
         <div>Current stage: {analysis.stage}</div>
         <div>Can reply now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}</div>
         <div>Current gate: {analysis.lastReplyEval.explanation}</div>
-        <div>Reply mode: {replayModeLabel(tradeState.mode)}</div>
+        <div>Trade / practice mode: {replyModeLabel(tradeState.mode)}</div>
+        <div>Candidate list filter: {isPracticeMode ? "needs-practice only" : "all scanned days"}</div>
         <div>
           Current position: {tradeState.currentPosition
-            ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)}`
+            ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)} (${entrySemanticsLabel(tradeState.currentPosition.entrySemantics)})`
             : "Flat"}
         </div>
         <div>Last trade result: {formatTradeResult(tradeState.lastTrade)}</div>
@@ -793,7 +941,7 @@ export default function App() {
           Unlocked target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "none"}
         </div>
         <div>
-          Next target gate: {analysis.targetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}
+          Next target gate: {effectiveTargetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}
         </div>
       </section>
       {page === "replay" ? (
@@ -812,7 +960,14 @@ export default function App() {
             viewport={chartViewport}
             onViewportChange={setChartViewport}
           />
-          <ExplainPanel analysis={analysis} />
+          <ExplainPanel
+            analysis={analysis}
+            tradeState={tradeState}
+            manualEntrySummary={manualEntryConfigSummary}
+            entryGateOpen={entryGateOpen}
+            pendingEntrySemantics={resolvedEntryConfig.entrySemantics}
+            pendingEntryPrice={resolvedEntryConfig.entryPrice}
+          />
         </main>
       ) : (
         <DebugPanel
@@ -820,6 +975,10 @@ export default function App() {
           activeDataset={activeDataset}
           candidateTradeDays={selectedTradeDayState?.availableTradeDays ?? []}
           tradeState={tradeState}
+          entryGateOpen={entryGateOpen}
+          pendingEntrySemantics={resolvedEntryConfig.entrySemantics}
+          pendingEntryPrice={resolvedEntryConfig.entryPrice}
+          effectiveStopDistance={effectiveStopDistance}
         />
       )}
       <section className="footer-grid">
@@ -838,7 +997,7 @@ export default function App() {
         <div>
           <h3>Target ladder</h3>
           <ul>
-            {analysis.targetLevels.map((level) => (
+            {effectiveTargetLevels.map((level) => (
               <li key={level.tier}>
                 TP{level.tier}: {level.status} @ {level.price.toFixed(4)} — {level.reason}
                 {level.missingGate ? ` Missing gate: ${level.missingGate}` : ""}
@@ -853,6 +1012,10 @@ export default function App() {
             <li>Closed trades: {tradeState.trades.length}</li>
             <li>Last result: {formatTradeResult(tradeState.lastTrade)}</li>
             <li>Cumulative PnL: {formatPnL(tradeState.cumulativePnL)}</li>
+            <li>Strategy entry: {formatPrice(tradeState.currentPosition?.strategyEntryPrice ?? analysis.entryPrice)}</li>
+            <li>Manual execution price: {formatPrice(tradeState.currentPosition?.manualExecutionPrice)}</li>
+            <li>Trade PnL entry basis: {formatPrice(tradeState.currentPosition?.entryPrice ?? resolvedEntryConfig.entryPrice)}</li>
+            <li>Entry semantics: {entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? resolvedEntryConfig.entrySemantics)}</li>
           </ul>
         </div>
         <div>
@@ -866,6 +1029,8 @@ export default function App() {
             <li>Replay range: {analysis.replayStartIndex} → {analysis.replayEndIndex}</li>
             <li>Invalid messages: {analysis.invalidReasons.join(" | ") || "none"}</li>
             <li>Manual gate source: {analysis.lastReplyEval.explanation}</li>
+            <li>Trade entry semantics in use: {entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? resolvedEntryConfig.entrySemantics)}</li>
+            <li>Effective stop distance: {formatPrice(effectiveStopDistance)}</li>
           </ul>
         </div>
       </section>

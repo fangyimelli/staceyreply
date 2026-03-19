@@ -14,12 +14,15 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 1m / 5m / 15m / 1h / 4h / 1D timeframe 切換
 - 高週期一律由 1m 原始資料聚合
 - dataset-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
-- Candidate Day 3 selector 會清楚列出偵測到的日期；非 auto replay 時只顯示 `needs-practice` 候選日
+- Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
 - FGD / FRD Day 3 規則驗證與 replay analysis
 - dataset validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
+- Replay mode（Pause / Auto Replay / Semi Replay）與 Reply mode（Auto Reply / Manual Reply）分離，避免把播放方式與交易/練習模式混用
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
+- Candidate list filter 可獨立切換 `Show all scanned days` / `Show needs-practice only`，不再綁定 replay 播放模式
 - Manual Reply 明確提供 Enter Long / Enter Short / Exit / Reset Trade，且 entry gate 直接綁定 `analysis.lastReplyEval`
+- Manual Reply 的 entry 語義已統一：可明確選擇使用 strategy-confirmed `analysis.entryPrice`、user-specified execution price、或 current bar close；Explain Panel / Trade ledger / Diagnostics 會分開顯示 strategy entry 與 manual execution price，並讓 target ladder / stop distance / cumulative PnL 對齊同一組 entry basis
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - 新增 Debug Page，集中顯示策略流程參數、stage health、target state 與 needs-debug 清單

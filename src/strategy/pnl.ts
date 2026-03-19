@@ -14,6 +14,9 @@ export const createTradeExecution = ({
   mode,
   side,
   entryPrice,
+  strategyEntryPrice,
+  manualExecutionPrice,
+  entrySemantics,
   entryBarIndex,
   entryTime,
   cumulativePnL,
@@ -22,6 +25,9 @@ export const createTradeExecution = ({
   mode: TradeExecution["mode"];
   side: TradeSide;
   entryPrice: number;
+  strategyEntryPrice?: number;
+  manualExecutionPrice?: number;
+  entrySemantics: TradeExecution["entrySemantics"];
   entryBarIndex: number;
   entryTime: string;
   cumulativePnL: number;
@@ -30,6 +36,9 @@ export const createTradeExecution = ({
   mode,
   side,
   entryPrice,
+  strategyEntryPrice,
+  manualExecutionPrice,
+  entrySemantics,
   entryBarIndex,
   entryTime,
   realizedPnL: 0,
