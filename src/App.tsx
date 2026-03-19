@@ -95,8 +95,6 @@ export default function App() {
     createReplayPnLState("auto"),
   );
   const [practiceFilterEnabled, setPracticeFilterEnabled] = useState(false);
-  const [manualEntryMode, setManualEntryMode] = useState<ManualEntryMode>("strategy");
-  const [manualEntryInput, setManualEntryInput] = useState("");
   const [chartViewport, setChartViewport] = useState({ startIndex: 0, endIndex: 0 });
   const tradeIdRef = useRef(0);
   const previousBarsLengthRef = useRef(0);
@@ -930,10 +928,8 @@ export default function App() {
         <div>Current stage: {analysis.stage}</div>
         <div>Can reply now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}</div>
         <div>Current gate: {analysis.lastReplyEval.explanation}</div>
-        <div>Entry gate open: {entryGateOpen ? "Yes" : "No"}</div>
         <div>Trade / practice mode: {replyModeLabel(tradeState.mode)}</div>
         <div>Candidate list filter: {isPracticeMode ? "needs-practice only" : "all scanned days"}</div>
-        <div>Manual entry semantics: {manualEntryConfigSummary}</div>
         <div>
           Current position: {tradeState.currentPosition
             ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)} (${entrySemanticsLabel(tradeState.currentPosition.entrySemantics)})`
