@@ -5,6 +5,7 @@ import type {
   ReplayPnLState,
   ReplayStageId,
   RuleTraceItem,
+  TradeEntrySemantics,
 } from "../types/domain";
 import { toNyLabel } from "../strategy/engine";
 
@@ -29,6 +30,11 @@ const formatTime = (value?: string) => (value ? toNyLabel(value) : "n/a");
 
 const traceKey = (trace: RuleTraceItem) =>
   `${trace.ruleName}-${trace.timeframe}-${trace.reason}-${JSON.stringify(trace.times)}-${JSON.stringify(trace.prices)}`;
+const entrySemanticsLabel = (semantics: TradeEntrySemantics) => {
+  if (semantics === "strategy-entry") return "Strategy entry";
+  if (semantics === "manual-execution-user") return "Manual execution price";
+  return "Current bar close";
+};
 
 const summarizeStageState = (
   analysis: ReplayAnalysis,
@@ -58,11 +64,19 @@ export function DebugPanel({
   activeDataset,
   candidateTradeDays,
   tradeState,
+  entryGateOpen,
+  pendingEntrySemantics,
+  pendingEntryPrice,
+  effectiveStopDistance,
 }: {
   analysis: ReplayAnalysis;
   activeDataset: ParsedDataset;
   candidateTradeDays: CandidateTradeDay[];
   tradeState: ReplayPnLState;
+  entryGateOpen: boolean;
+  pendingEntrySemantics: TradeEntrySemantics;
+  pendingEntryPrice?: number;
+  effectiveStopDistance?: number;
 }) {
   const currentBar = analysis.timeframeBars["1m"][analysis.currentBarIndex];
   const visibleEvents = analysis.eventLog.filter(
@@ -116,9 +130,12 @@ export function DebugPanel({
           <div><strong>Current bar index</strong><span>{analysis.currentBarIndex}</span></div>
           <div><strong>Replay range</strong><span>{analysis.replayStartIndex} → {analysis.replayEndIndex}</span></div>
           <div><strong>Can reply / enter</strong><span>{analysis.lastReplyEval.canReply ? "true" : "false"}</span></div>
+          <div><strong>Entry gate open</strong><span>{entryGateOpen ? "true" : "false"}</span></div>
           <div><strong>Reply explanation</strong><span>{analysis.lastReplyEval.explanation}</span></div>
           <div><strong>Reply mode</strong><span>{tradeState.mode}</span></div>
           <div><strong>Current position</strong><span>{tradeState.currentPosition ? `${tradeState.currentPosition.side} @ ${tradeState.currentPosition.entryPrice.toFixed(4)}` : "none"}</span></div>
+          <div><strong>Trade entry semantics</strong><span>{entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? pendingEntrySemantics)}</span></div>
+          <div><strong>Pending/manual entry price</strong><span>{formatPrice(pendingEntryPrice)}</span></div>
           <div><strong>Cumulative PnL</strong><span>{tradeState.cumulativePnL.toFixed(4)}</span></div>
         </div>
       </section>
@@ -133,7 +150,10 @@ export function DebugPanel({
           <div><strong>LOD</strong><span>{formatPrice(analysis.lod)}</span></div>
           <div><strong>Source</strong><span>{formatPrice(analysis.sourcePrice)}</span></div>
           <div><strong>Stop</strong><span>{formatPrice(analysis.stopPrice)}</span></div>
-          <div><strong>Entry</strong><span>{formatPrice(analysis.entryPrice)}</span></div>
+          <div><strong>Strategy entry</strong><span>{formatPrice(analysis.entryPrice)}</span></div>
+          <div><strong>Manual execution price</strong><span>{formatPrice(tradeState.currentPosition?.manualExecutionPrice ?? pendingEntryPrice)}</span></div>
+          <div><strong>PnL basis entry</strong><span>{formatPrice(tradeState.currentPosition?.entryPrice ?? pendingEntryPrice ?? analysis.entryPrice)}</span></div>
+          <div><strong>Stop distance</strong><span>{formatPrice(effectiveStopDistance)}</span></div>
           <div><strong>Recommended target</strong><span>{analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "n/a"}</span></div>
           <div><strong>Status banner</strong><span>{analysis.statusBanner}</span></div>
           <div><strong>Quality</strong><span>{analysis.quality}</span></div>
