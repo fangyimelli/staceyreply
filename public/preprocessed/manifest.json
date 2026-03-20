@@ -1,6 +1,11 @@
 {
   "datasetVersion": "v4",
-  "generatedAt": "2026-03-20T03:40:34.274Z",
+  "generatedAt": "2026-03-20T04:05:12.236Z",
+  "diagnostics": {
+    "manifestPairCount": 1,
+    "missingPairFolders": [],
+    "skippedPairFolders": []
+  },
   "pairs": [
     {
       "id": "pair:sample-1m",
@@ -12,7 +17,10 @@
         "start": "2024-01-01",
         "end": "2024-01-03"
       },
-      "datasetVersion": "v4"
+      "datasetVersion": "v4",
+      "pairKey": "sample-1m",
+      "folderName": "sample-1m",
+      "symbol": "SAMPLE-1M"
     }
   ]
 }

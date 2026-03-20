@@ -56,8 +56,8 @@ public/
         <eventId>.json
 ```
 
-- `manifest.json`：app 啟動時先讀取的 pair 清單
-- `<pair-slug>/index.json`：該 pair 的候選事件摘要與 event 檔案位址；只包含 `eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`
+- `manifest.json`：app 啟動時先讀取的 pair 清單，並附帶 `manifestPairCount`、`missingPairFolders`、`skippedPairFolders` diagnostics
+- `<pair-slug>/index.json`：該 pair 的候選事件摘要與 event 檔案位址，並保留 `pairKey` / `folderName` / `symbol`；候選事件只包含 `eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`
 - `<pair-slug>/events/<eventId>.json`：單一候選事件的完整 replay dataset，內含 `bars1m` 與 `precomputedTimeframeBars`（5m / 15m / 1h / 4h / 1D）
 
 ## 新增 pair 的流程

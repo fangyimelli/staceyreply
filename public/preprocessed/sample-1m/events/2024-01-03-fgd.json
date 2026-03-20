@@ -54531,7 +54531,7 @@
     ]
   },
   "eventId": "2024-01-03-fgd",
-  "pair": "SAMPLE-1M",
+  "pair": "sample-1m",
   "candidateDate": "2024-01-03",
   "template": "FGD",
   "metadata": {

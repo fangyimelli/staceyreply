@@ -60,9 +60,11 @@ export function ExplainPanel({
           <li>Manual entry UI: {manualEntrySummary}</li>
           <li>Entry gate open: {entryGateOpen ? "true" : "false"}</li>
           <li>Pending entry basis: {entrySemanticsLabel(pendingEntrySemantics)} @ {formatPrice(pendingEntryPrice)}</li>
-          <li>Strategy entry: {formatPrice(analysis.entryPrice)}</li>
+          <li>Candidate entry price: {formatPrice(analysis.candidateEntryPrice)}</li>
+          <li>Confirmed entry price: {formatPrice(analysis.confirmedEntryPrice)}</li>
+          <li>Entry display mode: {analysis.confirmedEntryPrice !== undefined ? "strategy-confirmed entry" : "candidate entry only / blocked entry basis"}</li>
           <li>Manual execution price: {formatPrice(tradeState.currentPosition?.manualExecutionPrice ?? pendingEntryPrice)}</li>
-          <li>Trade PnL basis entry: {formatPrice(tradeState.currentPosition?.entryPrice ?? pendingEntryPrice ?? analysis.entryPrice)}</li>
+          <li>Trade PnL basis entry: {formatPrice(tradeState.currentPosition?.entryPrice ?? pendingEntryPrice ?? analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice)}</li>
         </ul>
       </section>
       <section>
