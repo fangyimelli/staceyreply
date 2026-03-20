@@ -13,7 +13,7 @@
       "template": "FGD",
       "shortSummary": "FGD candidate detected for Day 3 review.",
       "practiceStatus": "needs-practice",
-      "datasetPath": "preprocessed/sample-1m/events/2024-01-03-fgd.json"
+      "datasetPath": "preprocessed-sample/sample-1m/events/2024-01-03-fgd.json"
     }
   ]
 }

@@ -1,26 +1,40 @@
 {
-  "datasetVersion": "v4",
-  "generatedAt": "2026-03-20T04:05:12.236Z",
+  "datasetVersion": "v6",
+  "generatedAt": "2026-03-20T00:00:00.000Z",
   "diagnostics": {
-    "manifestPairCount": 1,
+    "manifestPairCount": 4,
+    "officialPairUniverse": ["eurusd", "usdcad", "gbpusd", "audusd"],
+    "manifestPairKeys": ["eurusd", "usdcad", "gbpusd", "audusd"],
+    "missingOfficialPairs": [],
     "missingPairFolders": [],
-    "skippedPairFolders": []
+    "skippedPairFolders": [],
+    "discoveredCsvFiles": [
+      "staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv"
+    ],
+    "officialCsvFilesExpected": [
+      "staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv"
+    ],
+    "officialCsvFilesFound": [
+      "staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv",
+      "staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv"
+    ],
+    "preprocessingSucceededPairs": ["eurusd", "usdcad", "gbpusd", "audusd"],
+    "preprocessingFailedPairs": [],
+    "failureReasonPerPair": {},
+    "manifestOutputPath": "public/preprocessed/manifest.json"
   },
   "pairs": [
-    {
-      "id": "pair:sample-1m",
-      "label": "SAMPLE-1M",
-      "sourceLabel": "data/pairs/sample-1m/raw/1m.csv",
-      "indexPath": "preprocessed/sample-1m/index.json",
-      "candidateCount": 1,
-      "dateRange": {
-        "start": "2024-01-01",
-        "end": "2024-01-03"
-      },
-      "datasetVersion": "v4",
-      "pairKey": "sample-1m",
-      "folderName": "sample-1m",
-      "symbol": "SAMPLE-1M"
-    }
+    {"id": "pair:eurusd", "label": "EURUSD", "sourceLabel": "staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv", "indexPath": "preprocessed/eurusd/index.json", "candidateCount": 0, "dateRange": null, "datasetVersion": "v6", "pairKey": "eurusd", "folderName": "eurusd", "symbol": "EURUSD"},
+    {"id": "pair:usdcad", "label": "USDCAD", "sourceLabel": "staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv", "indexPath": "preprocessed/usdcad/index.json", "candidateCount": 0, "dateRange": null, "datasetVersion": "v6", "pairKey": "usdcad", "folderName": "usdcad", "symbol": "USDCAD"},
+    {"id": "pair:gbpusd", "label": "GBPUSD", "sourceLabel": "staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv", "indexPath": "preprocessed/gbpusd/index.json", "candidateCount": 0, "dateRange": null, "datasetVersion": "v6", "pairKey": "gbpusd", "folderName": "gbpusd", "symbol": "GBPUSD"},
+    {"id": "pair:audusd", "label": "AUDUSD", "sourceLabel": "staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv", "indexPath": "preprocessed/audusd/index.json", "candidateCount": 0, "dateRange": null, "datasetVersion": "v6", "pairKey": "audusd", "folderName": "audusd", "symbol": "AUDUSD"}
   ]
 }

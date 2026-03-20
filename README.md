@@ -31,7 +31,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - Chart / Debug Page 會即時顯示 current score、score band、hard gates、category breakdown、top positive features、missing high-value features、以及 entry blocked 原因
 - TP30 / TP35 / TP40 / TP50 目標梯級會依 actual trade mode 或 blocked/hypothetical 狀態顯示；若 entry blocked，不再把 target 標成真實 hit，並會列出下一個 upgrade gate
-- sample-1m 若保留，只能屬於 sample/demo 流程；正式 pair selector 與正式資料載入流程不再 fallback 到 sample-1m
+- sample-1m 若保留，只能屬於 sample/demo 流程，並固定輸出到 `public/preprocessed-sample/`；正式 pair selector 與正式資料載入流程不再 fallback 到 sample-1m
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
 - 圖表有 viewport state，預設追蹤右側最新已揭露 bars，支援滑鼠滾輪縮放與拖曳平移
 - 不串 broker API，只讀本機 `data/` 預處理產物
@@ -71,14 +71,14 @@ npm run preprocess:data
 4. 針對每個 official pair 寫出 `public/preprocessed/<pair-slug>/index.json`
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
 6. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
-7. sample mode 若保留，必須維持獨立資料來源，不可混入 official manifest
+7. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
 8. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
 
 ## Pair switching
 
 - 左上 `Pair` 下拉選單只顯示 `EURUSD` / `USDCAD` / `GBPUSD` / `AUDUSD`
 - `Candidate Day 3` 會列出該 pair 掃描出的候選日期，而不是把整個 replay payload 直接當成單一 trade day
-- 正式流程不再使用 sample-1m；若未來保留 sample mode，必須與正式 pair selector 分離
+- 正式流程不再使用 sample-1m；若未來保留 sample mode，必須使用 `public/preprocessed-sample/` 並與正式 pair selector 分離
 - 不再顯示單檔 / 資料夾 / JSON 上傳流程；可用 pair 完全由預處理 manifest 決定，而候選事件由 pair index 驅動；pair 切換本身不會預先把全部 bars 載入
 
 ## Timeframe switching

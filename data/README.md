@@ -62,4 +62,4 @@ npm run preprocess:data
 
 ## Sample mode
 
-`sample-1m` 若保留，只能用於 sample/demo 模式，不可混入正式 pair selector 或正式預處理 manifest。
+`sample-1m` 若保留，只能用於 sample/demo 模式，且必須輸出到 `public/preprocessed-sample/`；不可混入正式 pair selector、`public/preprocessed/manifest.json` 或正式 event 輸出。
