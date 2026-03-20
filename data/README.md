@@ -57,7 +57,7 @@ public/
 ```
 
 - `manifest.json`：app 啟動時先讀取的 pair 清單
-- `<pair-slug>/index.json`：該 pair 的候選事件摘要
+- `<pair-slug>/index.json`：該 pair 的候選事件摘要與 event 檔案位址
 - `<pair-slug>/events/<eventId>.json`：單一候選事件的完整 replay dataset
 
 ## 新增 pair 的流程
