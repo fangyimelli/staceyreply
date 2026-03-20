@@ -72,13 +72,12 @@ export interface PreprocessedManifest {
 }
 
 export interface PairCandidateSummary {
+  eventId: string;
   candidateDate: string;
   template: TemplateType;
-  eventId: string;
-  datasetPath: string;
+  shortSummary: string;
   practiceStatus: PracticeStatus;
-  valid: boolean;
-  summaryReason: string;
+  datasetPath: string;
 }
 
 export interface PairCandidateIndex {
@@ -271,7 +270,7 @@ export interface CandidateTradeDay {
   template: TemplateType;
   practiceStatus: PracticeStatus;
   valid: boolean;
-  summaryReason: string;
+  shortSummary: string;
 }
 
 export interface SelectedTradeDayState {

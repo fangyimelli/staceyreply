@@ -1461,7 +1461,7 @@ export const scanCandidateTradeDays = (
         analysis.invalidReasons,
       ),
       valid: !analysis.invalidReasons.length,
-      summaryReason: summarizeCandidate(
+      shortSummary: summarizeCandidate(
         analysis.template,
         analysis.invalidReasons,
         analysis.missingConditions,
