@@ -138,6 +138,7 @@ export default function App() {
                 sourceLabel: error.sourceLabel,
                 phase: error.phase,
                 message: error.message,
+                diagnostics: error.diagnostics,
               }
             : {
                 datasetId: "manifest",
@@ -145,6 +146,9 @@ export default function App() {
                 sourceLabel: "/preprocessed/manifest.json",
                 phase: "file-read" as const,
                 message: error instanceof Error ? error.message : String(error),
+                diagnostics: {
+                  requestedUrl: "/preprocessed/manifest.json",
+                },
               };
         setDatasetLoadError(loadError);
         setIsDatasetLoading(false);
@@ -184,7 +188,7 @@ export default function App() {
     setSelectedEventId("");
     setMode("pause");
 
-    loadPairCandidateIndex(selectedDataset)
+    loadPairCandidateIndex(selectedDataset, manifestDiagnostics ?? undefined)
       .then((index) => {
         if (cancelled) return;
         console.debug("[ReplayLoader] pair index fetched", {
@@ -206,6 +210,7 @@ export default function App() {
                 sourceLabel: error.sourceLabel,
                 phase: error.phase,
                 message: error.message,
+                diagnostics: error.diagnostics,
               }
             : {
                 datasetId: selectedDataset.id,
@@ -213,7 +218,19 @@ export default function App() {
                 sourceLabel: selectedDataset.indexPath,
                 phase: "analysis-setup" as const,
                 message: error instanceof Error ? error.message : String(error),
+                diagnostics: {
+                  requestedUrl: selectedDataset.indexPath.startsWith("/") ? selectedDataset.indexPath : `/${selectedDataset.indexPath}`,
+                },
               };
+        console.error("[ReplayLoader] pair index load failure", {
+          pairId: selectedDataset.id,
+          requestedPairIndexUrl: loadError.diagnostics?.requestedUrl,
+          pairIndexResponseStatus: loadError.diagnostics?.responseStatus,
+          pairIndexContentType: loadError.diagnostics?.contentType,
+          pairIndexFirst80Chars: loadError.diagnostics?.first80Chars,
+          pairIndexFileExistsAtBuildTime: loadError.diagnostics?.fileExistsAtBuildTime,
+          message: loadError.message,
+        });
         setDatasetLoadError(loadError);
         setIsDatasetLoading(false);
       });
@@ -221,7 +238,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [hasCompleteOfficialManifest, selectedDataset]);
+  }, [hasCompleteOfficialManifest, manifestDiagnostics, selectedDataset]);
 
   const availableTradeDays = useMemo<CandidateTradeDay[]>(
     () => (pairIndex?.candidates ?? []).map(toCandidateTradeDay),
@@ -319,6 +336,7 @@ export default function App() {
                 sourceLabel: error.sourceLabel,
                 phase: error.phase,
                 message: error.message,
+                diagnostics: error.diagnostics,
               }
             : {
                 datasetId: selectedDataset.id,
@@ -642,6 +660,11 @@ export default function App() {
                 <li>Dataset source: {describeSourceType()}</li>
                 <li>Load failure phase: {loaderPhaseLabel(datasetLoadError.phase)}</li>
                 <li>Loader/runtime message: {datasetLoadError.message}</li>
+                <li>requestedPairIndexUrl: {datasetLoadError.diagnostics?.requestedUrl ?? "n/a"}</li>
+                <li>pairIndexResponseStatus: {datasetLoadError.diagnostics?.responseStatus ?? "n/a"}</li>
+                <li>pairIndexContentType: {datasetLoadError.diagnostics?.contentType ?? "n/a"}</li>
+                <li>pairIndexFirst80Chars: {datasetLoadError.diagnostics?.first80Chars ?? "n/a"}</li>
+                <li>pairIndexFileExistsAtBuildTime: {datasetLoadError.diagnostics?.fileExistsAtBuildTime === undefined ? "n/a" : String(datasetLoadError.diagnostics.fileExistsAtBuildTime)}</li>
               </ul>
             </div>
           </section>
