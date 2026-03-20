@@ -7,7 +7,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const dataRoot = path.join(repoRoot, 'data', 'pairs');
 const outputRoot = path.join(repoRoot, 'public', 'preprocessed');
-const DATASET_VERSION = 'v2';
+const DATASET_VERSION = 'v3';
 const RAW_FILENAME = '1m.csv';
 const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
 const TIME_HEADER_ALIASES = new Set(['time', 'datetime', 'date', 'timestamp']);
@@ -142,6 +142,7 @@ const buildDailyBars = (barsByDay, days) => days.map((day) => {
 });
 const summarizeCandidate = (template) => template === 'FGD' ? 'FGD candidate detected for Day 3 review.' : 'FRD candidate detected for Day 3 review.';
 const sanitizeEventId = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const buildEventId = (candidateDate, template) => sanitizeEventId(`${candidateDate}-${template}`);
 
 const buildCandidateSummaries = (parsed, pairSlug) => {
   const barsByDay = groupByNyDate(parsed.bars1m);
@@ -156,7 +157,7 @@ const buildCandidateSummaries = (parsed, pairSlug) => {
     const frd = pump && d1.close < d1.open;
     const template = fgd ? 'FGD' : frd ? 'FRD' : null;
     if (!template) return [];
-    const eventId = sanitizeEventId(`${pairSlug}-${tradeDay.day}-${template}`);
+    const eventId = buildEventId(tradeDay.day, template);
     return [{ candidateDate: tradeDay.day, template, eventId, valid: true, practiceStatus: 'needs-practice', summaryReason: summarizeCandidate(template) }];
   });
 };

@@ -167,10 +167,7 @@ export default function App() {
       .then((index) => {
         if (cancelled) return;
         setPairIndex(index);
-        setSelectedTradeDay(index.candidates[0]?.candidateDate ?? "");
-        if (!index.candidates.length) {
-          setIsDatasetLoading(false);
-        }
+        setIsDatasetLoading(false);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -215,30 +212,20 @@ export default function App() {
   const selectedTradeDayState = useMemo<SelectedTradeDayState | null>(() => {
     if (!availableTradeDays.length) return null;
     return {
-      selectedTradeDay: selectedTradeDay || availableTradeDays[0]?.date || "",
+      selectedTradeDay,
       availableTradeDays,
     };
   }, [availableTradeDays, selectedTradeDay]);
 
   useEffect(() => {
-    if (!selectedTradeDayState) return;
-    const explicitSelection = selectedTradeDay;
-    if (
-      explicitSelection &&
-      selectedTradeDayState.availableTradeDays.some((candidate) => candidate.date === explicitSelection)
-    ) {
+    if (!selectedTradeDay) {
+      setActiveDataset(null);
+      setMode("pause");
+      setDatasetLoadError(null);
       return;
     }
 
-    const nextTradeDay =
-      visibleCandidateTradeDays[0]?.date ?? selectedTradeDayState.availableTradeDays[0]?.date ?? "";
-    if (nextTradeDay !== selectedTradeDayState.selectedTradeDay) {
-      setSelectedTradeDay(nextTradeDay);
-    }
-  }, [selectedTradeDay, selectedTradeDayState, visibleCandidateTradeDays]);
-
-  useEffect(() => {
-    if (!selectedDataset || !pairIndex || !selectedTradeDay) return;
+    if (!selectedDataset || !pairIndex) return;
     const selectedCandidate = pairIndex.candidates.find(
       (candidate) => candidate.candidateDate === selectedTradeDay,
     );
@@ -508,13 +495,13 @@ export default function App() {
       <div className="app-shell">
         <header>
           <h1>Stacey Reply Replay</h1>
-          <p>Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.</p>
+          <p>Fixed `data/` replay pipeline with pair selection, index-only pair switching, and explicit event payload loading. No broker API.</p>
         </header>
         <section className="upload-grid">
           <div className="upload-card">
             <h3>Replay dataset flow</h3>
             <p>{datasetImportMessage}</p>
-            <p className="upload-note">Fixed `data/` raw CSV → preprocessing → manifest → pair index → single event load.</p>
+            <p className="upload-note">Fixed `data/` raw CSV → preprocessing → manifest → pair index → explicit event selection → single event load.</p>
           </div>
         </section>
         <section className="control-grid">
@@ -531,12 +518,12 @@ export default function App() {
           <label>
             Candidate Day 3
             <select value={selectedTradeDayState?.selectedTradeDay ?? ""} onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)} disabled>
-              <option value="">{pairIndex ? "Wait for event load to complete" : "Wait for pair index to load"}</option>
+              <option value="">{pairIndex ? "Choose a candidate event to load" : "Wait for pair index to load"}</option>
             </select>
           </label>
         </section>
         <section className="info-strip">
-          <div>{isDatasetLoading ? "Loading preprocessed data…" : datasetLoadError ? "Pair loader failed." : "Event payload pending or unavailable."}</div>
+          <div>{isDatasetLoading ? "Loading preprocessed data…" : datasetLoadError ? "Pair loader failed." : pairIndex && !activeDataset ? "Pair index loaded. Choose a candidate event to fetch bars." : "Event payload loaded."}</div>
           <div>Dataset source: {selectedDataset ? describeSourceType() : "none"}</div>
           {!isDatasetLoading && datasetLoadError ? (
             <div>Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}</div>
@@ -699,13 +686,13 @@ export default function App() {
     <div className="app-shell">
       <header>
         <h1>Stacey Reply Replay</h1>
-        <p>Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.</p>
+        <p>Fixed `data/` replay pipeline with pair selection, index-only pair switching, and explicit event payload loading. No broker API.</p>
       </header>
       <section className="upload-grid">
         <div className="upload-card">
           <h3>Replay dataset flow</h3>
           <p>{datasetImportMessage}</p>
-          <p className="upload-note">Datasets arrive from the fixed `data/` preprocessing flow, then lazily load pair index and single-event payloads.</p>
+          <p className="upload-note">Datasets arrive from the fixed `data/` preprocessing flow, then load pair index first and fetch bars only after explicit event selection.</p>
         </div>
       </section>
       <section className="control-grid">
@@ -722,6 +709,7 @@ export default function App() {
         <label>
           Candidate Day 3
           <select value={selectedTradeDayState?.selectedTradeDay ?? ""} onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)}>
+            <option value="">Choose candidate event</option>
             {visibleCandidateTradeDays.length ? (
               visibleCandidateTradeDays.map((candidate) => (
                 <option key={candidate.date} value={candidate.date}>
