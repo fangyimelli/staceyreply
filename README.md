@@ -5,8 +5,8 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 ## Confirmed features
 
 - 使用固定的 `data/` 原始資料契約：每個 pair 必須存放在 `data/pairs/<pair-slug>/raw/1m.csv`
-- 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars、輸出 manifest 與 replay dataset 產物
-- app 啟動時只讀 `public/replay/manifest.json` 與對應 dataset 產物，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
+- 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars、輸出 manifest / pair index / 單一事件 replay dataset 產物
+- app 啟動時只讀 `public/preprocessed/manifest.json`，選 pair 時再讀對應 `index.json`，選候選事件時才讀單一 event dataset，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
 - parser 主責任為讀取 raw CSV 並正規化為 strategy 可用的標準 1m bars
 - CSV 支援 BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
 - 自動辨識 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在預處理結果內建立 normalized strategy time
@@ -52,8 +52,8 @@ npm run dev
 
 1. 原始資料只放在 `data/pairs/<pair-slug>/raw/1m.csv`
 2. 預處理腳本從 `data/` 讀 raw CSV
-3. 輸出 `public/replay/manifest.json` 與 `public/replay/datasets/*.json`
-4. app 啟動時只讀預處理結果
+3. 輸出 `public/preprocessed/manifest.json`、`public/preprocessed/<PAIR>/index.json` 與 `public/preprocessed/<PAIR>/events/<eventId>.json`
+4. app 依序 lazy-load 預處理結果
 
 ## Preprocessing flow
 
@@ -65,16 +65,17 @@ npm run preprocess:data
 
 1. 掃描 `data/pairs/*/raw/1m.csv`
 2. parser 讀取 raw CSV 並轉成標準 1m bars
-3. 寫出 `public/replay/manifest.json`
-4. 針對每個 pair 寫出 `public/replay/datasets/<pair-slug>.json`
-5. app 再用 manifest 驅動 pair selector 與 replay dataset 載入
+3. 寫出 `public/preprocessed/manifest.json`
+4. 針對每個 pair 寫出 `public/preprocessed/<pair-slug>/index.json`
+5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`
+6. app 再用 manifest → pair index → single event dataset 的順序載入
 
 ## Pair switching
 
 - 左上 `Pair` 下拉選單切換 manifest 內的商品 / replay pair
 - `Candidate Day 3` 會列出該 pair 掃描出的候選日期，而不是把整個 replay payload 直接當成單一 trade day
 - sample pair 來自 `data/pairs/sample-1m/raw/1m.csv`
-- 不再顯示單檔 / 資料夾 / JSON 上傳流程；可用 pair 完全由預處理 manifest 決定
+- 不再顯示單檔 / 資料夾 / JSON 上傳流程；可用 pair 完全由預處理 manifest 決定，而候選事件由 pair index 驅動
 
 ## Timeframe switching
 

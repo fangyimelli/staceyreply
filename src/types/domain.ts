@@ -50,13 +50,43 @@ export interface OhlcvBar {
 
 export type UserDatasetSource = "preprocessed-manifest";
 
+export interface DatasetDateRange {
+  start: string;
+  end: string;
+}
+
 export interface DatasetManifestItem {
   id: string;
   label: string;
   sourceLabel: string;
-  artifactPath: string;
-  barCount: number;
-  parseStatus: ParsedDataset["parseStatus"];
+  indexPath: string;
+  candidateCount: number;
+  dateRange: DatasetDateRange | null;
+  datasetVersion: string;
+}
+
+export interface PreprocessedManifest {
+  datasetVersion: string;
+  generatedAt: string;
+  pairs: DatasetManifestItem[];
+}
+
+export interface PairCandidateSummary {
+  candidateDate: string;
+  template: TemplateType;
+  eventId: string;
+  datasetPath: string;
+  practiceStatus: PracticeStatus;
+  valid: boolean;
+  summaryReason: string;
+}
+
+export interface PairCandidateIndex {
+  pairId: string;
+  pairLabel: string;
+  sourceLabel: string;
+  datasetVersion: string;
+  candidates: PairCandidateSummary[];
 }
 
 export interface ParsedDataset {
@@ -67,6 +97,22 @@ export interface ParsedDataset {
   parseStatus: "success" | "error";
   parseErrors: string[];
   parseDiagnostics: string[];
+}
+
+export interface ReplayEventMetadata {
+  eventWindow: {
+    startDate: string;
+    endDate: string;
+    availableDates: string[];
+  };
+}
+
+export interface PreprocessedReplayEventDataset extends ParsedDataset {
+  eventId: string;
+  pair: string;
+  candidateDate: string;
+  template: TemplateType;
+  metadata: ReplayEventMetadata;
 }
 
 export type DatasetLoadFailurePhase = "file-read" | "parse" | "analysis-setup";

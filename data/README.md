@@ -48,14 +48,17 @@ npm run preprocess:data
 
 ```text
 public/
-  replay/
+  preprocessed/
     manifest.json
-    datasets/
-      <pair-slug>.json
+    <pair-slug>/
+      index.json
+      events/
+        <eventId>.json
 ```
 
-- `manifest.json`：app 啟動時先讀取的 pair index
-- `datasets/<pair-slug>.json`：預處理後的 replay dataset
+- `manifest.json`：app 啟動時先讀取的 pair 清單
+- `<pair-slug>/index.json`：該 pair 的候選事件摘要
+- `<pair-slug>/events/<eventId>.json`：單一候選事件的完整 replay dataset
 
 ## 新增 pair 的流程
 
