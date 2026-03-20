@@ -4,8 +4,9 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 
 ## Confirmed features
 
-- 支援啟動時載入本機預處理 pair manifest / index
-- pair selector 只顯示 manifest 內已預處理好的 replay pair
+- 固定使用 `data/` 原始 CSV 作為資料入口，流程為 raw CSV → 預處理 → structured replay dataset → app 自動載入
+- 啟動後先掃描可用 pair / replay dataset，再做 FRD / FGD 候選日期篩選
+- Pair 為主要資料切換單位；trade day 選擇建立在 pair 掃描結果之上
 - 自動匯入標準 OHLC CSV/JSON，支援 CSV BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
 - 無 offset 的時間字串會依固定規則解析為 `America/New_York` wall-clock，再正規化成帶 offset 的可重現 strategy timestamp
 - 自動匯入 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在 app 內建立 normalized strategy time
@@ -15,6 +16,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 高週期一律由 1m 原始資料聚合
 - pair-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
 - Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
+- replay dataset 會保留以前後各 2 天為目標的事件視窗；若資料不足則使用可得區間
 - FGD / FRD Day 3 規則驗證與 replay analysis
 - pair validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
@@ -27,11 +29,11 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - 新增 Debug Page，集中顯示策略流程參數、stage health、target state 與 needs-debug 清單
 - TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
-- 內建預處理 replay pair 可直接展示完整 replay 流程
+- Sample mode 保留作為文件與驗證敘述中的確認案例
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
 - 圖表有 viewport state，預設追蹤右側最新已揭露 bars，支援滑鼠滾輪縮放與拖曳平移
-- 不串 broker API，只讀本機預處理 manifest 對應的歷史數據
-- README、預處理 replay pair、acceptance checklist generator 持續維護
+- 不串 broker API，只讀本機 `data/` / sample 歷史數據
+- README、sample mode、acceptance checklist generator 持續維護
 
 ## Planned / pending
 
@@ -53,24 +55,25 @@ npm run dev
 
 ## Data source flow
 
-1. 啟動後直接讀取本機預處理 replay pair manifest，作為可立即操作的確認案例。
-2. UI 頂層只顯示 pair selector；選定 pair 後會直接讀取 manifest/index 對應的 replay payload。
+1. 原始資料固定來自 `data/` 目錄中的 CSV。
+2. 啟動流程先對 `data/` 內容做預處理，將 raw CSV 轉成可重現的 structured replay dataset。
 3. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
-4. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
+4. 預處理與載入流程不改寫原始 CSV；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
 5. `source/raw time` 的語義會明確區分為三類：ISO with offset、MT fixed EST（UTC-5 / no DST）、以及 unqualified local text。
 6. `normalized strategy time` 一律正規化成可重現的 `America/New_York` offset timestamp，供 strategy、session、day bucket 與 replay UI 使用。
 7. 若來源時間落在紐約夏令時間期間，MT fixed EST 的 normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
 8. strategy 先做 pair-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
-9. UI 先提供 pair selector，再提供該 pair 內的候選日期 selector / 清單。
-10. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
-11. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
+9. 系統依掃描結果建立 pair 清單與對應的 structured replay dataset，UI 只提供 pair selector 與候選日期 selector。
+10. replay dataset 會以選定 trade day 為中心，盡量保留前 2 天與後 2 天事件視窗，讓 source / stop hunt / entry / management 可連續回放。
+11. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
+12. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
 
 ## Pair switching
 
-- 左上 `Pair` 下拉選單切換 manifest 內的商品 / replay pair
-- `Candidate Day 3` 會列出該 pair 掃描出的候選日期，而不是把整個 replay payload 直接當成單一 trade day
-- 內建預處理 pair 為立即可用的完整案例
-- 不再顯示檔案 / 資料夾上傳流程；可用 pair 由預處理 manifest 決定
+- UI 以 `Pair` 作為主要切換器，而不是檔案或資料夾
+- 每個 pair 都來自固定 `data/` 流程預處理後的 structured replay dataset
+- `Candidate Day 3` 只列出該 pair 掃描出的候選日期，不把原始檔直接視為單一 trade day
+- `sample mode` 僅作為確認案例敘述；正式資料流以固定 `data/` pair 掃描與自動載入為主
 
 ## Timeframe switching
 
@@ -169,11 +172,12 @@ Diagnostics 也會同步列出：
 
 ## Preprocessed replay pairs
 
-- 直接選任一內建 replay pair
+- sample mode 保留作為確認案例與文件驗證敘述
 - 內建案例包含 dump/pump 背景、signal day、source、stop hunt、123、20EMA、entry、TP 命中
 - 適合驗證 replay/backtest 流程與 explain panel 內容
 
 ## Removed/Deprecated Log
 
-- 已移除以 backend upload metadata 為中心的舊 replay 輸入模式
-- 不再顯示單檔 / 資料夾匯入；現在改為預處理 manifest/index 驅動的 pair 載入
+- 已移除以手動資料選取為中心的舊 replay 輸入描述
+- 不再描述任何已淘汰的手動資料選取流程
+- dataset flow 以固定 `data/` 原始 CSV → 預處理 → pair 選擇 → 自動載入為準

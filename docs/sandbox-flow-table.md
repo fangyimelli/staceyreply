@@ -2,7 +2,7 @@
 
 | Layer | SSOT input | Output | Notes |
 |---|---|---|---|
-| parser | `dist/mnt/data/*.csv/json` raw text | 1m OHLCV bars | No upload UI |
+| parser | `dist/mnt/data/*.csv/json` raw text | 1m OHLCV bars | Fixed data pipeline only |
 | timeframe aggregation | 1m bars | 5m / 15m / 1h / 4h / 1D bars | America/New_York session semantics |
 | dataset validation | Parsed 1m bars | explicit invalid messages | Never hard-judge incomplete data |
 | strategy engine | validated day buckets + session bars | FGD / FRD / Invalid / Incomplete classification | Rule-traceable |
