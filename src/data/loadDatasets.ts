@@ -1,33 +1,43 @@
-import { buildSampleCsv } from './sampleData';
+import replayPairBarsJson from '../../sample/sample-1m.json';
+import replayPairWindowsCsv from '../../sample/frd_fgd_three_day_windows.csv?raw';
 import { parseDatasetFile } from '../parser/fileParser';
 import type {
   DatasetFile,
   DatasetLoadFailurePhase,
   DatasetManifestItem,
   ParsedDataset,
-  UserDatasetSource,
 } from '../types/domain';
 
-const sampleDatasetFile: DatasetFile = {
-  id: 'sample-mode',
-  label: 'sample-replay.csv',
-  path: 'sample-mode',
-  kind: 'csv',
-  raw: buildSampleCsv(),
-  isSample: true,
-  sourceType: 'sample',
-};
+const preprocessedDatasetFiles: DatasetFile[] = [
+  {
+    id: 'pair:sample-1m',
+    label: 'SAMPLE-1M',
+    path: 'sample/sample-1m.json',
+    kind: 'json',
+    raw: JSON.stringify(replayPairBarsJson),
+    sourceType: 'preprocessed-manifest',
+  },
+  {
+    id: 'pair:frd-fgd-three-day-windows',
+    label: 'FRD-FGD-THREE-DAY-WINDOWS',
+    path: 'sample/frd_fgd_three_day_windows.csv',
+    kind: 'csv',
+    raw: replayPairWindowsCsv,
+    sourceType: 'preprocessed-manifest',
+  },
+];
 
-const getFileKind = (name: string): DatasetFile['kind'] | null => {
-  if (/\.csv$/i.test(name)) return 'csv';
-  if (/\.json$/i.test(name)) return 'json';
-  return null;
-};
+const preprocessedDatasetManifest: DatasetManifestItem[] = preprocessedDatasetFiles.map((file) => ({
+  id: file.id,
+  label: file.label,
+  path: file.path,
+  kind: file.kind,
+  sourceType: file.sourceType,
+}));
 
-const getRelativePath = (file: File) => file.webkitRelativePath || file.name;
-
-const toDatasetId = (sourceType: UserDatasetSource, relativePath: string) =>
-  `${sourceType}:${relativePath.toLowerCase()}`;
+const preprocessedDatasetFilesById = new Map(
+  preprocessedDatasetFiles.map((file) => [file.id, file]),
+);
 
 export class DatasetLoadError extends Error {
   datasetId: string;
@@ -57,73 +67,20 @@ export class DatasetLoadError extends Error {
   }
 }
 
-export const getBuiltinSampleManifest = (): DatasetManifestItem[] => [
-  {
-    id: sampleDatasetFile.id,
-    label: sampleDatasetFile.label,
-    path: sampleDatasetFile.path,
-    kind: sampleDatasetFile.kind,
-    isSample: sampleDatasetFile.isSample,
-    sourceType: 'sample',
-  },
-];
-
-export const fileToDatasetFile = async (
-  file: File,
-  sourceType: UserDatasetSource,
-): Promise<DatasetFile | null> => {
-  const kind = getFileKind(file.name);
-  if (!kind) return null;
-
-  const relativePath = getRelativePath(file);
-  return {
-    id: toDatasetId(sourceType, relativePath),
-    label: file.name,
-    path: relativePath,
-    kind,
-    raw: await file.text(),
-    sourceType,
-  };
-};
-
-export const createUserDatasetManifest = (
-  datasetFiles: DatasetFile[],
-): DatasetManifestItem[] =>
-  datasetFiles.map((file) => ({
-    id: file.id,
-    label: file.label,
-    path: file.path,
-    kind: file.kind,
-    isSample: file.isSample,
-    sourceType: file.sourceType,
-  }));
+export const getPreprocessedDatasetManifest = (): DatasetManifestItem[] =>
+  preprocessedDatasetManifest;
 
 export const loadParsedDataset = async (
   manifest: DatasetManifestItem,
-  datasetFilesById: Map<string, DatasetFile>,
 ): Promise<ParsedDataset> => {
-  if (manifest.isSample) {
-    try {
-      return parseDatasetFile(sampleDatasetFile);
-    } catch (error) {
-      throw new DatasetLoadError({
-        datasetId: manifest.id,
-        datasetLabel: manifest.label,
-        sourceLabel: sampleDatasetFile.label,
-        phase: 'parse',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  const datasetFile = datasetFilesById.get(manifest.id);
+  const datasetFile = preprocessedDatasetFilesById.get(manifest.id);
   if (!datasetFile) {
     throw new DatasetLoadError({
       datasetId: manifest.id,
       datasetLabel: manifest.label,
       sourceLabel: manifest.path,
       phase: 'file-read',
-      message: 'Dataset file contents were unavailable when the loader attempted to parse them.',
+      message: 'Preprocessed pair payload was missing from the local manifest index.',
     });
   }
 
@@ -133,7 +90,7 @@ export const loadParsedDataset = async (
     throw new DatasetLoadError({
       datasetId: manifest.id,
       datasetLabel: manifest.label,
-      sourceLabel: datasetFile.label,
+      sourceLabel: datasetFile.path,
       phase: 'parse',
       message: error instanceof Error ? error.message : String(error),
     });

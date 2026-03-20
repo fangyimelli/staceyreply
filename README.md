@@ -4,8 +4,8 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 
 ## Confirmed features
 
-- 支援本機單一 CSV/JSON 檔案載入
-- 支援本機資料夾批次載入 CSV/JSON，並保留相對路徑作為 dataset 來源標示
+- 支援啟動時載入本機預處理 pair manifest / index
+- pair selector 只顯示 manifest 內已預處理好的 replay pair
 - 自動匯入標準 OHLC CSV/JSON，支援 CSV BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
 - 無 offset 的時間字串會依固定規則解析為 `America/New_York` wall-clock，再正規化成帶 offset 的可重現 strategy timestamp
 - 自動匯入 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在 app 內建立 normalized strategy time
@@ -13,10 +13,10 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 當來源資料為 MT fixed EST 且紐約進入夏令時間時，內部 normalized strategy time 會自動調整 1 小時，讓 session 對齊紐約交易時段
 - 1m / 5m / 15m / 1h / 4h / 1D timeframe 切換
 - 高週期一律由 1m 原始資料聚合
-- dataset-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
+- pair-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
 - Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
 - FGD / FRD Day 3 規則驗證與 replay analysis
-- dataset validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
+- pair validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
 - Replay mode（Pause / Auto Replay / Semi Replay）與 Reply mode（Auto Reply / Manual Reply）分離，避免把播放方式與交易/練習模式混用
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
@@ -27,11 +27,11 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - 新增 Debug Page，集中顯示策略流程參數、stage health、target state 與 needs-debug 清單
 - TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
-- Sample mode 直接展示完整 replay 流程
+- 內建預處理 replay pair 可直接展示完整 replay 流程
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
 - 圖表有 viewport state，預設追蹤右側最新已揭露 bars，支援滑鼠滾輪縮放與拖曳平移
-- 不串 broker API，只讀本機 sample / 使用者選取的 CSV/JSON 歷史數據
-- README、sample mode、acceptance checklist generator 持續維護
+- 不串 broker API，只讀本機預處理 manifest 對應的歷史數據
+- README、預處理 replay pair、acceptance checklist generator 持續維護
 
 ## Planned / pending
 
@@ -53,24 +53,24 @@ npm run dev
 
 ## Data source flow
 
-1. 啟動後永遠保留內建 `sample mode` manifest，作為可立即操作的確認案例。
-2. 使用者可透過 UI 選擇單一檔案或整個資料夾；每個 CSV/JSON 會先轉成 `DatasetFile` abstraction，再動態生成 manifest。
+1. 啟動後直接讀取本機預處理 replay pair manifest，作為可立即操作的確認案例。
+2. UI 頂層只顯示 pair selector；選定 pair 後會直接讀取 manifest/index 對應的 replay payload。
 3. parser 會把標準 OHLC CSV/JSON 轉成 1m bars，也會自動辨識 MT fixed EST（`YYYY.MM.DD<TAB>HH:mm<TAB>open<TAB>high<TAB>low<TAB>close<TAB>volume`）格式。
 4. 匯入時不修改原始 CSV/JSON 檔案；對 MT fixed EST 資料只在記憶體內建立 `source/raw time` 與 `normalized strategy time` 兩套時間欄位。
 5. `source/raw time` 的語義會明確區分為三類：ISO with offset、MT fixed EST（UTC-5 / no DST）、以及 unqualified local text。
 6. `normalized strategy time` 一律正規化成可重現的 `America/New_York` offset timestamp，供 strategy、session、day bucket 與 replay UI 使用。
 7. 若來源時間落在紐約夏令時間期間，MT fixed EST 的 normalized strategy time 會比 source/raw time 快 1 小時，以對齊紐約交易時段；若非 DST 期間則兩者維持同一小時。
-8. strategy 先做 dataset-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
-9. UI 先提供資料來源選擇與 dataset selector，再提供該 dataset 內的候選日期 selector / 清單。
+8. strategy 先做 pair-level 掃描，遍歷每個可形成 Day 3 的日期，輸出候選日期、FGD/FRD/invalid 分類與摘要原因。
+9. UI 先提供 pair selector，再提供該 pair 內的候選日期 selector / 清單。
 10. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
 11. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
 
-## Dataset switching
+## Pair switching
 
-- 左上 `Dataset` 下拉選單切換 sample / 單檔 / 資料夾批次中的商品或檔案
-- `Candidate Day 3` 會列出該 dataset 掃描出的候選日期，而不是把整個檔案直接當成單一 trade day
-- `sample mode` 為內建完整案例
-- 單檔載入會生成單一使用者 dataset；資料夾批次載入會把每個支援檔案都加入同一個 selector
+- 左上 `Pair` 下拉選單切換 manifest 內的商品 / replay pair
+- `Candidate Day 3` 會列出該 pair 掃描出的候選日期，而不是把整個 replay payload 直接當成單一 trade day
+- 內建預處理 pair 為立即可用的完整案例
+- 不再顯示檔案 / 資料夾上傳流程；可用 pair 由預處理 manifest 決定
 
 ## Timeframe switching
 
@@ -107,7 +107,7 @@ npm run dev
 
 ## Debug Page 怎麼看
 
-- **Current Context**：當前 dataset、trade day、reply gate、PnL、當前 replay bar 時間與索引
+- **Current Context**：當前 pair、trade day、reply gate、PnL、當前 replay bar 時間與索引
 - **Strategy Parameters**：previous close、HOS/LOS/HOD/LOD、source/stop/entry、recommended target、quality
 - **Pipeline Stage Health**：每個策略 stage 的 pass / warn / fail 狀態與最新說明
 - **Needs Debug**：集中列出 invalid reasons、missing conditions、target missing gate、失敗 rule trace
@@ -167,13 +167,13 @@ Diagnostics 也會同步列出：
 - volume 是否由來源載入，或因為省略而預設為 `0`
 - dataset 採用哪一種時間語義，以及 unqualified local text 是否已正規化為 `America/New_York` offset timestamp
 
-## Sample mode
+## Preprocessed replay pairs
 
-- 直接選 `SAMPLE-REPLAY (sample mode)`
+- 直接選任一內建 replay pair
 - 內建案例包含 dump/pump 背景、signal day、source、stop hunt、123、20EMA、entry、TP 命中
 - 適合驗證 replay/backtest 流程與 explain panel 內容
 
 ## Removed/Deprecated Log
 
 - 已移除以 backend upload metadata 為中心的舊 replay 輸入模式
-- 不再把一般資料來源綁死在固定資料夾掃描；現在改為 sample mode + 使用者單檔/資料夾載入
+- 不再顯示單檔 / 資料夾匯入；現在改為預處理 manifest/index 驅動的 pair 載入
