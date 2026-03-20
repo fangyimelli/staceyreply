@@ -164,11 +164,12 @@ export default function App() {
   const officialPairUniverse = manifestDiagnostics?.officialPairUniverse ?? OFFICIAL_PAIR_KEYS;
   const manifestPairKeys = manifestDiagnostics?.manifestPairKeys ?? datasets.map((dataset) => dataset.pairKey);
   const missingOfficialPairs = manifestDiagnostics?.missingOfficialPairs ?? officialPairUniverse.filter((pairKey) => !manifestPairKeys.includes(pairKey));
+  const hasCompleteOfficialManifest = missingOfficialPairs.length === 0 && manifestPairKeys.every((pairKey) => OFFICIAL_PAIR_KEYS.includes(pairKey));
   const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0] ?? null;
   const selectedOfficialPair = selectedDataset ? OFFICIAL_PAIR_LOOKUP[selectedDataset.pairKey] : undefined;
 
   useEffect(() => {
-    if (!selectedDataset) return;
+    if (!selectedDataset || !hasCompleteOfficialManifest) return;
 
     let cancelled = false;
     console.debug("[ReplayLoader] pair selected", {
@@ -220,7 +221,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [selectedDataset]);
+  }, [hasCompleteOfficialManifest, selectedDataset]);
 
   const availableTradeDays = useMemo<CandidateTradeDay[]>(
     () => (pairIndex?.candidates ?? []).map(toCandidateTradeDay),
@@ -614,9 +615,10 @@ export default function App() {
             </select>
           </label>
         </section>
-        {missingOfficialPairs.length > 0 ? (
+        {!hasCompleteOfficialManifest ? (
           <section className="info-strip">
-            <div>Missing official pair: {missingOfficialPairs.join(", ")}</div>
+            <div>Missing official pair(s): {missingOfficialPairs.join(", ") || "unknown"}</div>
+            <div>Official replay is blocked until the official manifest contains exactly EURUSD, USDCAD, GBPUSD, and AUDUSD.</div>
           </section>
         ) : null}
         <section className="info-strip">
@@ -898,9 +900,10 @@ export default function App() {
           </label>
         ) : null}
       </section>
-      {missingOfficialPairs.length > 0 ? (
+      {!hasCompleteOfficialManifest ? (
         <section className="info-strip">
-          <div>Missing official pair: {missingOfficialPairs.join(", ")}</div>
+          <div>Missing official pair(s): {missingOfficialPairs.join(", ") || "unknown"}</div>
+          <div>Official replay is blocked until the official manifest contains exactly EURUSD, USDCAD, GBPUSD, and AUDUSD.</div>
         </section>
       ) : null}
       <section className="info-strip">
@@ -922,6 +925,7 @@ export default function App() {
         <div>Unlocked target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "none"}</div>
         <div>Manifest pair count: {manifestDiagnostics?.manifestPairCount ?? datasets.length}</div>
         <div>Visible pair count in UI: {visiblePairCount}</div>
+        <div>Official manifest complete: {hasCompleteOfficialManifest ? "Yes" : "No"}</div>
         <div>Selected pair key: {selectedPairKey}</div>
         <div>Next target gate: {effectiveTargetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}</div>
       </section>
@@ -1017,6 +1021,13 @@ export default function App() {
             <li>Selected pair key: {selectedPairKey}</li>
             <li>Missing pair folders: {manifestDiagnostics?.missingPairFolders.join(" | ") || "none"}</li>
             <li>Skipped pair folders: {manifestDiagnostics?.skippedPairFolders.map((item) => `${item.pairKey}: ${item.reason}`).join(" | ") || "none"}</li>
+            <li>Discovered CSV files: {manifestDiagnostics?.discoveredCsvFiles.join(" | ") || "none"}</li>
+            <li>Expected official CSV files: {manifestDiagnostics?.officialCsvFilesExpected.join(" | ") || "none"}</li>
+            <li>Found official CSV files: {manifestDiagnostics?.officialCsvFilesFound.join(" | ") || "none"}</li>
+            <li>Preprocessing succeeded pairs: {manifestDiagnostics?.preprocessingSucceededPairs.join(" | ") || "none"}</li>
+            <li>Preprocessing failed pairs: {manifestDiagnostics?.preprocessingFailedPairs.join(" | ") || "none"}</li>
+            <li>Failure reason per pair: {manifestDiagnostics ? Object.entries(manifestDiagnostics.failureReasonPerPair).map(([pairKey, reason]) => `${pairKey}: ${reason}`).join(" | ") || "none" : "none"}</li>
+            <li>Manifest output path: {manifestDiagnostics?.manifestOutputPath ?? "n/a"}</li>
             <li>Event window: {activeDataset.metadata.eventWindow.startDate} → {activeDataset.metadata.eventWindow.endDate}</li>
           </ul>
         </div>

@@ -65,6 +65,13 @@ export interface DatasetManifestDiagnostics {
     pairKey: string;
     reason: string;
   }>;
+  discoveredCsvFiles: string[];
+  officialCsvFilesExpected: string[];
+  officialCsvFilesFound: string[];
+  preprocessingSucceededPairs: string[];
+  preprocessingFailedPairs: string[];
+  failureReasonPerPair: Record<string, string>;
+  manifestOutputPath: string;
 }
 
 export interface DatasetManifestItem {

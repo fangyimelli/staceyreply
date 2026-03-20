@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -6,7 +6,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const outputRoot = path.join(repoRoot, 'public', 'preprocessed');
-const DATASET_VERSION = 'v5';
+const manifestOutputPath = path.join(outputRoot, 'manifest.json');
+const officialCsvRoot = path.join(repoRoot, 'dist', 'mnt', 'data');
+const DATASET_VERSION = 'v6';
 const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
 const TIME_HEADER_ALIASES = new Set(['time', 'datetime', 'date', 'timestamp']);
 const VOLUME_HEADER_ALIASES = new Set(['volume', 'vol']);
@@ -16,6 +18,7 @@ const OFFICIAL_PAIRS = [
     displayName: 'EURUSD',
     pairKey: 'eurusd',
     csvFile: 'staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv',
+    fileName: 'DAT_MT_EURUSD_M1_2025.csv',
     assetClass: 'fx',
     pipSize: 0.0001,
     tickSize: 0.00001,
@@ -24,6 +27,7 @@ const OFFICIAL_PAIRS = [
     displayName: 'USDCAD',
     pairKey: 'usdcad',
     csvFile: 'staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv',
+    fileName: 'DAT_MT_USDCAD_M1_2025.csv',
     assetClass: 'fx',
     pipSize: 0.0001,
     tickSize: 0.00001,
@@ -32,6 +36,7 @@ const OFFICIAL_PAIRS = [
     displayName: 'GBPUSD',
     pairKey: 'gbpusd',
     csvFile: 'staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv',
+    fileName: 'DAT_MT_GBPUSD_M1_2025.csv',
     assetClass: 'fx',
     pipSize: 0.0001,
     tickSize: 0.00001,
@@ -40,6 +45,7 @@ const OFFICIAL_PAIRS = [
     displayName: 'AUDUSD',
     pairKey: 'audusd',
     csvFile: 'staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv',
+    fileName: 'DAT_MT_AUDUSD_M1_2025.csv',
     assetClass: 'fx',
     pipSize: 0.0001,
     tickSize: 0.00001,
@@ -71,24 +77,48 @@ const toFixedEstIso = (dateText, timeText) => {
   return `${year}-${month}-${day}T${timeText}:00-05:00`;
 };
 
-const formatNyParts = (date) => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).formatToParts(date);
-  const read = (type) => parts.find((part) => part.type === type)?.value ?? '';
-  return { year: read('year'), month: read('month'), day: read('day'), hour: read('hour'), minute: read('minute'), second: read('second') };
+const nthWeekdayOfMonth = (year, monthIndex, weekday, occurrence) => {
+  const firstDay = new Date(Date.UTC(year, monthIndex, 1)).getUTCDay();
+  const delta = (weekday - firstDay + 7) % 7;
+  return 1 + delta + (occurrence - 1) * 7;
 };
+const firstSundayOfNovember = (year) => nthWeekdayOfMonth(year, 10, 0, 1);
+const secondSundayOfMarch = (year) => nthWeekdayOfMonth(year, 2, 0, 2);
+const getNyDstWindowUtc = (year) => ({
+  startUtcMs: Date.UTC(year, 2, secondSundayOfMarch(year), 7, 0, 0, 0),
+  endUtcMs: Date.UTC(year, 10, firstSundayOfNovember(year), 6, 0, 0, 0),
+});
+const isNyDst = (utcMs) => {
+  const year = new Date(utcMs).getUTCFullYear();
+  const { startUtcMs, endUtcMs } = getNyDstWindowUtc(year);
+  return utcMs >= startUtcMs && utcMs < endUtcMs;
+};
+const getNyOffsetMinutes = (utcMs) => (isNyDst(utcMs) ? -240 : -300);
 const getNyOffset = (date) => {
-  const offsetText = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'shortOffset', hour: '2-digit' })
-    .formatToParts(date).find((part) => part.type === 'timeZoneName')?.value ?? 'GMT-5';
-  const match = offsetText.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/i);
-  if (!match) return '-05:00';
-  const [, sign, hours, minutes] = match;
-  return `${sign}${hours.padStart(2, '0')}:${(minutes ?? '00').padStart(2, '0')}`;
+  const offsetMinutes = getNyOffsetMinutes(date.getTime());
+  const sign = offsetMinutes <= 0 ? '-' : '+';
+  const absoluteMinutes = Math.abs(offsetMinutes);
+  const hours = String(Math.floor(absoluteMinutes / 60)).padStart(2, '0');
+  const minutes = String(absoluteMinutes % 60).padStart(2, '0');
+  return `${sign}${hours}:${minutes}`;
 };
+const formatNyPartsFromUtcMs = (utcMs) => {
+  const offsetMinutes = getNyOffsetMinutes(utcMs);
+  const localMs = utcMs + offsetMinutes * 60_000;
+  const localDate = new Date(localMs);
+  return {
+    year: String(localDate.getUTCFullYear()).padStart(4, '0'),
+    month: String(localDate.getUTCMonth() + 1).padStart(2, '0'),
+    day: String(localDate.getUTCDate()).padStart(2, '0'),
+    hour: String(localDate.getUTCHours()).padStart(2, '0'),
+    minute: String(localDate.getUTCMinutes()).padStart(2, '0'),
+    second: String(localDate.getUTCSeconds()).padStart(2, '0'),
+  };
+};
+const formatNyParts = (date) => formatNyPartsFromUtcMs(date.getTime());
 const toNyIso = (date, includeMilliseconds = false) => {
-  const wallClock = formatNyParts(date);
+  const utcMs = date.getTime();
+  const wallClock = formatNyPartsFromUtcMs(utcMs);
   const milliseconds = date.getUTCMilliseconds();
   const fraction = includeMilliseconds || milliseconds ? `.${String(milliseconds).padStart(3, '0')}` : '';
   return `${wallClock.year}-${wallClock.month}-${wallClock.day}T${wallClock.hour}:${wallClock.minute}:${wallClock.second}${fraction}${getNyOffset(date)}`;
@@ -164,7 +194,11 @@ const parseRawCsvDataset = ({ datasetId, label, sourceLabel, raw }) => {
   return { datasetId, symbol: label.toUpperCase(), bars1m: bars, sourceLabel, parseStatus: 'success', parseErrors: [], parseDiagnostics: diagnostics };
 };
 
-const strategyNyDate = (time) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(time));
+const strategyNyDate = (time) => {
+  const utcMs = new Date(time).getTime();
+  const parts = formatNyPartsFromUtcMs(utcMs);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
 const groupByNyDate = (bars) => bars.reduce((acc, bar) => {
   const date = strategyNyDate(bar.time);
   (acc[date] ??= []).push(bar);
@@ -189,12 +223,6 @@ const aggregateGroup = (group) => ({
   sourceTime: group[0].sourceTime,
   sourceStartTime: group[0].sourceTime ?? group[0].time,
   sourceEndTime: group[group.length - 1].sourceTime ?? group[group.length - 1].time,
-  traceTimes: group.map((bar) => ({
-    normalizedTime: bar.normalizedTime ?? bar.time,
-    sourceTime: bar.sourceTime ?? bar.time,
-    rawTimeText: bar.rawTimeText,
-    rawDateText: bar.rawDateText,
-  })),
   timeSemantics: group[0].timeSemantics,
   rawTimeText: group[0].rawTimeText,
   rawDateText: group[0].rawDateText,
@@ -222,6 +250,14 @@ const aggregateBars = (bars, timeframe) => {
   return [...buckets.values()].map(aggregateGroup);
 };
 const buildTimeframeBarMap = (bars1m) => Object.fromEntries(replayTimeframes.map((timeframe) => [timeframe, aggregateBars(bars1m, timeframe)]));
+
+const slicePrecomputedTimeframeBars = (fullTimeframeBars, windowDays) => {
+  const allowedDays = new Set(windowDays);
+  return Object.fromEntries(replayTimeframes.map((timeframe) => [
+    timeframe,
+    (fullTimeframeBars[timeframe] ?? []).filter((bar) => allowedDays.has(strategyNyDate(bar.normalizedTime ?? bar.time))),
+  ]));
+};
 
 const buildCandidateSummaries = (parsed, pairSlug) => {
   const barsByDay = groupByNyDate(parsed.bars1m);
@@ -251,10 +287,16 @@ const sliceEventWindow = (bars, candidateDate) => {
 };
 
 const resolveCsvSourcePath = (csvFile) => path.join(repoRoot, csvFile.replace(/^staceyreply\//, ''));
+const toRepoRelativePath = (absolutePath) => path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
 
 const main = async () => {
   await rm(outputRoot, { recursive: true, force: true });
   await mkdir(outputRoot, { recursive: true });
+
+  const discoveredCsvFiles = (await readdir(officialCsvRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
+    .map((entry) => `staceyreply/dist/mnt/data/${entry.name}`)
+    .sort();
 
   const manifest = {
     datasetVersion: DATASET_VERSION,
@@ -266,6 +308,13 @@ const main = async () => {
       missingOfficialPairs: [],
       missingPairFolders: [],
       skippedPairFolders: [],
+      discoveredCsvFiles,
+      officialCsvFilesExpected: OFFICIAL_PAIRS.map((pair) => pair.csvFile),
+      officialCsvFilesFound: [],
+      preprocessingSucceededPairs: [],
+      preprocessingFailedPairs: [],
+      failureReasonPerPair: {},
+      manifestOutputPath: toRepoRelativePath(manifestOutputPath),
     },
     pairs: [],
   };
@@ -274,18 +323,26 @@ const main = async () => {
     const datasetId = `pair:${pair.pairKey}`;
     const sourcePath = resolveCsvSourcePath(pair.csvFile);
     const sourceLabel = pair.csvFile;
+    const discovered = discoveredCsvFiles.includes(pair.csvFile);
+    if (discovered) {
+      manifest.diagnostics.officialCsvFilesFound.push(pair.csvFile);
+    }
 
     try {
+      if (!discovered) {
+        throw new Error(`Official CSV not found at ${sourceLabel}.`);
+      }
       const raw = await readFile(sourcePath, 'utf8');
       const parsed = parseRawCsvDataset({ datasetId, label: pair.displayName, sourceLabel, raw });
       const candidateSummaries = buildCandidateSummaries(parsed, pair.pairKey);
+      const fullTimeframeBars = buildTimeframeBarMap(parsed.bars1m);
       const pairOutputRoot = path.join(outputRoot, pair.pairKey);
       const eventsRoot = path.join(pairOutputRoot, 'events');
       await mkdir(eventsRoot, { recursive: true });
 
       for (const candidate of candidateSummaries) {
         const eventWindow = sliceEventWindow(parsed.bars1m, candidate.candidateDate);
-        const precomputedTimeframeBars = buildTimeframeBarMap(eventWindow.bars);
+        const precomputedTimeframeBars = slicePrecomputedTimeframeBars(fullTimeframeBars, eventWindow.windowDays);
         const eventPayload = {
           datasetId,
           symbol: parsed.symbol,
@@ -293,7 +350,6 @@ const main = async () => {
           parseStatus: parsed.parseStatus,
           parseErrors: parsed.parseErrors,
           parseDiagnostics: parsed.parseDiagnostics,
-          bars: eventWindow.bars,
           bars1m: eventWindow.bars,
           precomputedTimeframeBars,
           eventId: candidate.eventId,
@@ -308,7 +364,7 @@ const main = async () => {
             },
           },
         };
-        await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload, null, 2)}\n`, 'utf8');
+        await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload)}\n`, 'utf8');
       }
 
       const indexPath = `preprocessed/${pair.pairKey}/index.json`;
@@ -329,7 +385,7 @@ const main = async () => {
           datasetPath,
         })),
       };
-      await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex, null, 2)}\n`, 'utf8');
+      await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex)}\n`, 'utf8');
 
       const barsByDay = groupByNyDate(parsed.bars1m);
       const allDays = Object.keys(barsByDay).sort();
@@ -345,10 +401,14 @@ const main = async () => {
         folderName: pair.pairKey,
         symbol: parsed.symbol,
       });
+      manifest.diagnostics.preprocessingSucceededPairs.push(pair.pairKey);
     } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      manifest.diagnostics.preprocessingFailedPairs.push(pair.pairKey);
+      manifest.diagnostics.failureReasonPerPair[pair.pairKey] = reason;
       manifest.diagnostics.skippedPairFolders.push({
         pairKey: pair.pairKey,
-        reason: error instanceof Error ? error.message : String(error),
+        reason,
       });
     }
   }
@@ -358,7 +418,18 @@ const main = async () => {
   manifest.diagnostics.missingOfficialPairs = OFFICIAL_PAIRS.map((pair) => pair.pairKey).filter((pairKey) => !manifest.pairs.some((pair) => pair.pairKey === pairKey));
   manifest.diagnostics.missingPairFolders = [...manifest.diagnostics.missingOfficialPairs];
 
-  await writeFile(path.join(outputRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  await writeFile(manifestOutputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+  console.log(JSON.stringify({
+    discoveredCsvFiles: manifest.diagnostics.discoveredCsvFiles,
+    officialCsvFilesExpected: manifest.diagnostics.officialCsvFilesExpected,
+    officialCsvFilesFound: manifest.diagnostics.officialCsvFilesFound,
+    preprocessingSucceededPairs: manifest.diagnostics.preprocessingSucceededPairs,
+    preprocessingFailedPairs: manifest.diagnostics.preprocessingFailedPairs,
+    failureReasonPerPair: manifest.diagnostics.failureReasonPerPair,
+    manifestOutputPath: manifest.diagnostics.manifestOutputPath,
+    manifestPairKeys: manifest.diagnostics.manifestPairKeys,
+  }, null, 2));
 
   if (manifest.diagnostics.missingOfficialPairs.length > 0) {
     throw new Error(`Missing official pair(s): ${manifest.diagnostics.missingOfficialPairs.join(', ')}`);
