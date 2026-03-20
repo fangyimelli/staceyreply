@@ -11,7 +11,7 @@ const formatPrice = (value?: number) =>
   value === undefined || Number.isNaN(value) ? "n/a" : value.toFixed(4);
 const formatTime = (value?: string) => (value ? toNyLabel(value) : "n/a");
 const entrySemanticsLabel = (semantics: TradeEntrySemantics) => {
-  if (semantics === "strategy-entry") return "Strategy entry";
+  if (semantics === "strategy-entry") return "Confirmed entry";
   if (semantics === "manual-execution-user") return "Manual execution price";
   return "Current bar close";
 };
@@ -69,7 +69,9 @@ export function DebugPanel({
           <div><strong>Reply explanation</strong><span>{analysis.lastReplyEval.explanation}</span></div>
           <div><strong>Trade entry semantics</strong><span>{entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? pendingEntrySemantics)}</span></div>
           <div><strong>Pending/manual entry price</strong><span>{formatPrice(pendingEntryPrice)}</span></div>
-          <div><strong>Stop distance</strong><span>{formatPrice(effectiveStopDistance)}</span></div>
+          <div><strong>Candidate entry price</strong><span>{formatPrice(analysis.candidateEntryPrice)}</span></div>
+          <div><strong>Confirmed entry price</strong><span>{formatPrice(analysis.confirmedEntryPrice)}</span></div>
+          <div><strong>Stop distance (pips/units)</strong><span>{formatPrice(effectiveStopDistance)}</span></div>
           <div><strong>Cumulative PnL</strong><span>{tradeState.cumulativePnL.toFixed(4)}</span></div>
           <div><strong>Backtest snapshot</strong><span>{JSON.stringify(analysis.backtestSnapshot)}</span></div>
         </div>
@@ -134,6 +136,7 @@ export function DebugPanel({
               <div>Status: {level.status}</div>
               <div>Eligible: {level.eligible ? "true" : "false"}</div>
               <div>Hit: {level.hit ? "true" : "false"}</div>
+              <div>Mode: {level.mode ?? "n/a"}</div>
               <div>Reason: {level.reason}</div>
               <div>Missing gate: {level.missingGate ?? "none"}</div>
             </article>
@@ -150,6 +153,11 @@ export function DebugPanel({
           <li>Candidate count: {candidateTradeDays.length}</li>
           <li>Loaded 1m bars: {activeDataset.bars1m.length}</li>
           <li>Entry gate open: {entryGateOpen ? "true" : "false"}</li>
+          <li>Manifest pair count: {analysis.pairDiagnostics?.manifestPairCount ?? "n/a"}</li>
+          <li>Visible pair count in UI: {analysis.pairDiagnostics?.visiblePairCount ?? "n/a"}</li>
+          <li>Selected pair key: {analysis.pairDiagnostics?.selectedPairKey ?? "n/a"}</li>
+          <li>Missing pair folders: {analysis.pairDiagnostics?.missingPairFolders.join(" | ") || "none"}</li>
+          <li>Skipped pair folders: {analysis.pairDiagnostics?.skippedPairFolders.map((item) => `${item.pairKey}: ${item.reason}`).join(" | ") || "none"}</li>
         </ul>
       </section>
     </section>

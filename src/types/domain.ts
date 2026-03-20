@@ -55,6 +55,15 @@ export interface DatasetDateRange {
   end: string;
 }
 
+export interface DatasetManifestDiagnostics {
+  manifestPairCount: number;
+  missingPairFolders: string[];
+  skippedPairFolders: Array<{
+    pairKey: string;
+    reason: string;
+  }>;
+}
+
 export interface DatasetManifestItem {
   id: string;
   label: string;
@@ -63,11 +72,15 @@ export interface DatasetManifestItem {
   candidateCount: number;
   dateRange: DatasetDateRange | null;
   datasetVersion: string;
+  pairKey: string;
+  folderName: string;
+  symbol: string;
 }
 
 export interface PreprocessedManifest {
   datasetVersion: string;
   generatedAt: string;
+  diagnostics?: DatasetManifestDiagnostics;
   pairs: DatasetManifestItem[];
 }
 
@@ -85,14 +98,31 @@ export interface PairCandidateIndex {
   pairLabel: string;
   sourceLabel: string;
   datasetVersion: string;
+  pairKey: string;
+  folderName: string;
+  symbol: string;
   candidates: PairCandidateSummary[];
 }
 
 export type TimeframeBarMap = Record<Timeframe, OhlcvBar[]>;
 
+export interface InstrumentMeta {
+  pairKey: string;
+  symbol: string;
+  assetClass: "fx" | "metal" | "index" | "crypto" | "sample";
+  quotePrecision: number;
+  tickSize: number;
+  pipSize: number;
+  pointSize: number;
+  preferredStopPips?: number;
+  maxStopPips?: number;
+  maxStopPoints?: number;
+}
+
 export interface ParsedDataset {
   datasetId: string;
   symbol: string;
+  instrument?: InstrumentMeta;
   bars1m: OhlcvBar[];
   precomputedTimeframeBars?: Partial<TimeframeBarMap>;
   sourceLabel: string;
@@ -193,7 +223,8 @@ export interface TradeLevel {
   price: number;
   eligible: boolean;
   hit: boolean;
-  status: "blocked" | "pending" | "eligible" | "hit";
+  status: "blocked" | "pending" | "eligible" | "hit" | "hypothetical";
+  mode?: "actual" | "hypothetical" | "disabled";
   reason: string;
   missingGate?: string;
 }
@@ -243,6 +274,8 @@ export interface UnifiedSignalDayStrategy {
   scoreBand: UnifiedScoreBand;
   entryAllowed: boolean;
   entryReason: string;
+  candidateEntryPrice?: number;
+  confirmedEntryPrice?: number;
   debugBreakdown: {
     byCategory: Record<UnifiedFeatureCategory, number>;
     topPositiveFeatures: UnifiedWeightedFeature[];
@@ -313,6 +346,7 @@ export interface ReplayPnLState {
 export interface ReplayDatasetAnalysis {
   datasetId: string;
   symbol: string;
+  instrument: InstrumentMeta;
   timeframeBars: TimeframeBarMap;
   template: TemplateType;
   bias: "bullish" | "bearish" | "neutral";
@@ -327,7 +361,8 @@ export interface ReplayDatasetAnalysis {
   replayStartIndex: number;
   replayEndIndex: number;
   stopPrice?: number;
-  entryPrice?: number;
+  candidateEntryPrice?: number;
+  confirmedEntryPrice?: number;
   sourcePrice?: number;
   previousClose?: number;
   hos?: number;
@@ -337,6 +372,13 @@ export interface ReplayDatasetAnalysis {
   targetLevels: TradeLevel[];
   recommendedTarget?: 30 | 35 | 40 | 50;
   unifiedStrategy: UnifiedSignalDayStrategy;
+  pairDiagnostics?: {
+    manifestPairCount: number;
+    visiblePairCount: number;
+    selectedPairKey: string;
+    missingPairFolders: string[];
+    skippedPairFolders: Array<{ pairKey: string; reason: string }>;
+  };
   backtestSnapshot: BacktestSignalSnapshot;
 }
 
