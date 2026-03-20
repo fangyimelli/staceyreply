@@ -68,8 +68,8 @@ const toCandidateTradeDay = (candidate: PairCandidateSummary): CandidateTradeDay
   date: candidate.candidateDate,
   template: candidate.template,
   practiceStatus: candidate.practiceStatus,
-  valid: candidate.valid,
-  summaryReason: candidate.summaryReason,
+  valid: candidate.template === "FGD" || candidate.template === "FRD",
+  shortSummary: candidate.shortSummary,
 });
 
 export default function App() {
@@ -713,7 +713,7 @@ export default function App() {
             {visibleCandidateTradeDays.length ? (
               visibleCandidateTradeDays.map((candidate) => (
                 <option key={candidate.date} value={candidate.date}>
-                  {candidate.date} · {candidate.template} · {candidate.valid ? "valid" : "invalid"}
+                  {candidate.date} · {candidate.template} · {candidate.valid ? "valid" : "invalid"} · {candidate.shortSummary}
                 </option>
               ))
             ) : (
@@ -791,7 +791,7 @@ export default function App() {
         <div>Dataset source: {describeSourceType()}</div>
         <div>Parse status: {activeDataset.parseStatus}</div>
         <div>Trade day: {analysis.selectedTradeDay}</div>
-        <div>Candidate summary: {selectedCandidate?.summaryReason ?? "none"}</div>
+        <div>Candidate summary: {selectedCandidate?.shortSummary ?? "none"}</div>
         <div>Current stage: {analysis.stage}</div>
         <div>Can reply now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}</div>
         <div>Current gate: {analysis.lastReplyEval.explanation}</div>
@@ -847,7 +847,7 @@ export default function App() {
           <h3>Detected candidate dates</h3>
           <ul>
             {visibleCandidateTradeDays.map((candidate) => (
-              <li key={candidate.date}>{candidate.date} — {candidate.template} — {candidate.valid ? "valid" : "invalid"} — {candidate.summaryReason}</li>
+              <li key={candidate.date}>{candidate.date} — {candidate.template} — {candidate.valid ? "valid" : "invalid"} — {candidate.shortSummary}</li>
             ))}
           </ul>
         </div>

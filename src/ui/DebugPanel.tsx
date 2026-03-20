@@ -123,7 +123,7 @@ export function DebugPanel({
         <h3>Current Context</h3>
         <div className="debug-kv-grid">
           <div><strong>Symbol</strong><span>{analysis.symbol}</span></div>
-          <div><strong>Candidate summary</strong><span>{activeCandidate?.summaryReason ?? "n/a"}</span></div>
+          <div><strong>Candidate summary</strong><span>{activeCandidate?.shortSummary ?? "n/a"}</span></div>
           <div><strong>Practice status</strong><span>{activeCandidate?.practiceStatus ?? "n/a"}</span></div>
           <div><strong>Current replay time</strong><span>{formatTime(currentBar?.normalizedTime ?? currentBar?.time)}</span></div>
           <div><strong>Current raw/source time</strong><span>{currentBar?.sourceTime ?? currentBar?.rawTimeText ?? currentBar?.time ?? "n/a"}</span></div>
