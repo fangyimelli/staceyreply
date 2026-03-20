@@ -81,6 +81,7 @@ export default function App() {
   const [userDatasetFiles, setUserDatasetFiles] = useState<DatasetFile[]>([]);
   const [datasetId, setDatasetId] = useState(builtinSampleManifest[0]?.id ?? "");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
+  const [datasetLoadError, setDatasetLoadError] = useState<Error | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
   const [isImportingDatasets, setIsImportingDatasets] = useState(false);
   const [datasetImportMessage, setDatasetImportMessage] = useState(
@@ -121,6 +122,7 @@ export default function App() {
 
     let cancelled = false;
     setIsDatasetLoading(true);
+    setDatasetLoadError(null);
     setMode("pause");
 
     loadParsedDataset(selectedDataset, datasetFilesById)
@@ -132,9 +134,10 @@ export default function App() {
         setTradeState((prev) => resetTradeState(prev.mode));
         setIsDatasetLoading(false);
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return;
         setActiveDataset(null);
+        setDatasetLoadError(error instanceof Error ? error : new Error(String(error)));
         setIsDatasetLoading(false);
       });
 
@@ -375,6 +378,19 @@ export default function App() {
     activeDataset?.bars1m[
       Math.min(currentBarIndex, Math.max((activeDataset?.bars1m.length ?? 1) - 1, 0))
     ]?.time;
+
+  if (analysis) {
+    const timeframeBars = analysis.timeframeBars[timeframe];
+    if (!Array.isArray(timeframeBars)) {
+      throw new Error(`Missing timeframe bars for ${timeframe}.`);
+    }
+    if (currentBarIndex < 0 || currentBarIndex > analysis.replayEndIndex) {
+      throw new Error(
+        `Replay index ${currentBarIndex} is outside range ${analysis.replayStartIndex}-${analysis.replayEndIndex}.`,
+      );
+    }
+  }
+
   const bars = useMemo(() => {
     if (!analysis) return [];
     return analysis.timeframeBars[timeframe].filter(
@@ -427,6 +443,11 @@ export default function App() {
 
     previousBarsLengthRef.current = bars.length;
   }, [bars]);
+
+
+  if (datasetLoadError) {
+    throw new Error(`Dataset load failed for ${datasetId || "unknown dataset"}: ${datasetLoadError.message}`);
+  }
 
   const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0] ?? null;
   const selectedDatasetLabel = selectedDataset ? datasetLabelText(selectedDataset) : "UNKNOWN";
