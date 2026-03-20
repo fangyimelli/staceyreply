@@ -88,10 +88,13 @@ export interface PairCandidateIndex {
   candidates: PairCandidateSummary[];
 }
 
+export type TimeframeBarMap = Record<Timeframe, OhlcvBar[]>;
+
 export interface ParsedDataset {
   datasetId: string;
   symbol: string;
   bars1m: OhlcvBar[];
+  precomputedTimeframeBars?: Partial<TimeframeBarMap>;
   sourceLabel: string;
   parseStatus: "success" | "error";
   parseErrors: string[];
@@ -240,7 +243,7 @@ export interface ReplayPnLState {
 export interface ReplayDatasetAnalysis {
   datasetId: string;
   symbol: string;
-  timeframeBars: Record<Timeframe, OhlcvBar[]>;
+  timeframeBars: TimeframeBarMap;
   template: TemplateType;
   bias: "bullish" | "bearish" | "neutral";
   quality: "strong" | "acceptable" | "weak" | "invalid";

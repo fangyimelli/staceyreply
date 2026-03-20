@@ -1,7 +1,8 @@
-import type { OhlcvBar, Timeframe } from '../types/domain';
+import type { OhlcvBar, Timeframe, TimeframeBarMap } from '../types/domain';
 import { parseExplicitTimestampMs, strategyNyDate, strategyTime } from '../utils/nyDate';
 
 const minutesByTf: Record<Exclude<Timeframe, '1D'>, number> = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
+export const replayTimeframes: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1D'];
 
 const bucketStart = (bar: OhlcvBar, minutes: number) => {
   const ms = parseExplicitTimestampMs(strategyTime(bar));
@@ -47,3 +48,6 @@ export const aggregateBars = (bars: OhlcvBar[], timeframe: Timeframe): OhlcvBar[
   }
   return [...buckets.values()].map(aggregateGroup);
 };
+
+export const buildTimeframeBarMap = (bars1m: OhlcvBar[]): TimeframeBarMap =>
+  Object.fromEntries(replayTimeframes.map((timeframe) => [timeframe, aggregateBars(bars1m, timeframe)])) as TimeframeBarMap;

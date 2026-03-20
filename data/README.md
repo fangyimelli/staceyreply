@@ -22,7 +22,7 @@ data/
 
 - 檔名固定為 `1m.csv`。
 - 不接受 `5m.csv`、`data.json`、`history.txt` 這類替代主檔名做主流程輸入。
-- 高週期資料一律在 app / strategy pipeline 內由 1m bars 聚合，不另外存放於 `data/`。
+- 高週期資料不另外存放於 `data/`；它們會在預處理輸出階段由 1m bars 生成並寫進每個 event dataset，前端仍可在缺資料時回退到 runtime aggregation。
 
 ## CSV 欄位契約
 
@@ -58,7 +58,7 @@ public/
 
 - `manifest.json`：app 啟動時先讀取的 pair 清單
 - `<pair-slug>/index.json`：該 pair 的候選事件摘要與 event 檔案位址；只包含 `eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`
-- `<pair-slug>/events/<eventId>.json`：單一候選事件的完整 replay dataset
+- `<pair-slug>/events/<eventId>.json`：單一候選事件的完整 replay dataset，內含 `bars1m` 與 `precomputedTimeframeBars`（5m / 15m / 1h / 4h / 1D）
 
 ## 新增 pair 的流程
 

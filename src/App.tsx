@@ -246,6 +246,7 @@ export default function App() {
             dataset.symbol,
             dataset.bars1m,
             dataset.candidateDate,
+            dataset.precomputedTimeframeBars,
           );
           setActiveDataset(dataset);
           setCurrentBarIndex(0);
@@ -297,6 +298,7 @@ export default function App() {
       activeDataset.symbol,
       activeDataset.bars1m,
       activeDataset.candidateDate,
+      activeDataset.precomputedTimeframeBars,
     );
   }, [activeDataset]);
 

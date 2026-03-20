@@ -7,11 +7,14 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const dataRoot = path.join(repoRoot, 'data', 'pairs');
 const outputRoot = path.join(repoRoot, 'public', 'preprocessed');
-const DATASET_VERSION = 'v3';
+const DATASET_VERSION = 'v4';
 const RAW_FILENAME = '1m.csv';
 const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
 const TIME_HEADER_ALIASES = new Set(['time', 'datetime', 'date', 'timestamp']);
 const VOLUME_HEADER_ALIASES = new Set(['volume', 'vol']);
+
+const replayTimeframes = ['1m', '5m', '15m', '1h', '4h', '1D'];
+const minutesByTf = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
 
 const normalizeId = (name) =>
   name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -144,6 +147,51 @@ const summarizeCandidate = (template) => template === 'FGD' ? 'FGD candidate det
 const sanitizeEventId = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const buildEventId = (candidateDate, template) => sanitizeEventId(`${candidateDate}-${template}`);
 
+const parseExplicitTimestampMs = (time) => new Date(time).getTime();
+const bucketStart = (bar, minutes) => {
+  const ms = parseExplicitTimestampMs(bar.normalizedTime ?? bar.time);
+  return new Date(Math.floor(ms / (minutes * 60_000)) * minutes * 60_000).toISOString();
+};
+const aggregateGroup = (group) => ({
+  time: group[0].normalizedTime ?? group[0].time,
+  normalizedTime: group[0].normalizedTime ?? group[0].time,
+  sourceTime: group[0].sourceTime,
+  sourceStartTime: group[0].sourceTime ?? group[0].time,
+  sourceEndTime: group[group.length - 1].sourceTime ?? group[group.length - 1].time,
+  traceTimes: group.map((bar) => ({
+    normalizedTime: bar.normalizedTime ?? bar.time,
+    sourceTime: bar.sourceTime ?? bar.time,
+    rawTimeText: bar.rawTimeText,
+    rawDateText: bar.rawDateText,
+  })),
+  timeSemantics: group[0].timeSemantics,
+  rawTimeText: group[0].rawTimeText,
+  rawDateText: group[0].rawDateText,
+  open: group[0].open,
+  high: Math.max(...group.map((bar) => bar.high)),
+  low: Math.min(...group.map((bar) => bar.low)),
+  close: group[group.length - 1].close,
+  volume: group.reduce((sum, bar) => sum + bar.volume, 0),
+});
+const aggregateBars = (bars, timeframe) => {
+  if (timeframe === '1m') return bars;
+  const buckets = new Map();
+  if (timeframe === '1D') {
+    for (const bar of bars) {
+      const key = strategyNyDate(bar.normalizedTime ?? bar.time);
+      (buckets.get(key) ?? buckets.set(key, []).get(key)).push(bar);
+    }
+  } else {
+    const minutes = minutesByTf[timeframe];
+    for (const bar of bars) {
+      const key = bucketStart(bar, minutes);
+      (buckets.get(key) ?? buckets.set(key, []).get(key)).push(bar);
+    }
+  }
+  return [...buckets.values()].map(aggregateGroup);
+};
+const buildTimeframeBarMap = (bars1m) => Object.fromEntries(replayTimeframes.map((timeframe) => [timeframe, aggregateBars(bars1m, timeframe)]));
+
 const buildCandidateSummaries = (parsed, pairSlug) => {
   const barsByDay = groupByNyDate(parsed.bars1m);
   const days = Object.keys(barsByDay).sort();
@@ -193,6 +241,7 @@ const main = async () => {
 
     for (const candidate of candidateSummaries) {
       const eventWindow = sliceEventWindow(parsed.bars1m, candidate.candidateDate);
+      const precomputedTimeframeBars = buildTimeframeBarMap(eventWindow.bars);
       const eventPayload = {
         datasetId,
         symbol: parsed.symbol,
@@ -201,6 +250,7 @@ const main = async () => {
         parseErrors: parsed.parseErrors,
         parseDiagnostics: parsed.parseDiagnostics,
         bars1m: eventWindow.bars,
+        precomputedTimeframeBars,
         eventId: candidate.eventId,
         pair: parsed.symbol,
         candidateDate: candidate.candidateDate,
