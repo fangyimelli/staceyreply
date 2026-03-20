@@ -18,7 +18,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
 - replay dataset 會保留以前後各 2 天為目標的事件視窗；若資料不足則使用可得區間
 - FGD / FRD Day 3 規則驗證與 replay analysis
-- dataset validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
+- pair validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
 - Replay mode（Pause / Auto Replay / Semi Replay）與 Reply mode（Auto Reply / Manual Reply）分離，避免把播放方式與交易/練習模式混用
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
@@ -68,7 +68,7 @@ npm run dev
 11. 非 auto replay 狀態下，候選日期列表只顯示 `needs-practice` 的候選日；auto replay 則顯示完整掃描結果。
 12. 選定某個候選日期後，strategy 才執行 selected trade day 分析並建立 replay / explain panel 所需資料。
 
-## Dataset switching
+## Pair switching
 
 - UI 以 `Pair` 作為主要切換器，而不是檔案或資料夾
 - 每個 pair 都來自固定 `data/` 流程預處理後的 structured replay dataset
@@ -170,7 +170,7 @@ Diagnostics 也會同步列出：
 - volume 是否由來源載入，或因為省略而預設為 `0`
 - dataset 採用哪一種時間語義，以及 unqualified local text 是否已正規化為 `America/New_York` offset timestamp
 
-## Sample mode
+## Preprocessed replay pairs
 
 - sample mode 保留作為確認案例與文件驗證敘述
 - 內建案例包含 dump/pump 背景、signal day、source、stop hunt、123、20EMA、entry、TP 命中

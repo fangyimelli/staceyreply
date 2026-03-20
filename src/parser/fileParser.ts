@@ -305,7 +305,6 @@ export const parseDatasetFile = (file: DatasetFile): ParsedDataset => {
     symbol: file.label.replace(/\.(csv|json)$/i, '').toUpperCase(),
     bars1m: result.bars,
     sourceLabel: file.path,
-    isSample: Boolean(file.isSample),
     parseStatus: result.ok ? 'success' : 'error',
     parseErrors: result.ok ? [] : result.errors,
     parseDiagnostics: result.diagnostics,

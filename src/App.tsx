@@ -17,7 +17,6 @@ import {
 } from "./strategy/pnl";
 import type {
   CandidateTradeDay,
-  DatasetFile,
   DatasetLoadErrorInfo,
   DatasetManifestItem,
   ParsedDataset,
@@ -35,7 +34,7 @@ import { DebugPanel } from "./ui/DebugPanel";
 
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
-const builtinSampleManifest = getBuiltinSampleManifest();
+const preprocessedDatasetManifest = getPreprocessedDatasetManifest();
 
 const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
@@ -60,10 +59,7 @@ const formatTradeResult = (trade: TradeExecution | null) => {
 const resetTradeState = (mode: ReplayPnLState["mode"]) => createReplayPnLState(mode);
 const describeSourceType = () => "Structured replay dataset";
 const datasetLabelText = (dataset: DatasetManifestItem) =>
-  `${dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase()}${
-    dataset.isSample ? " (sample mode)" : ""
-  }`;
-const toDatasetMap = (files: DatasetFile[]) => new Map(files.map((file) => [file.id, file]));
+  dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase();
 const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   if (phase === "file-read") return "file read";
   if (phase === "parse") return "parse";
@@ -114,7 +110,7 @@ export default function App() {
     setDatasetLoadError(null);
     setMode("pause");
 
-    loadParsedDataset(selectedDataset, datasetFilesById)
+    loadParsedDataset(selectedDataset)
       .then((dataset) => {
         if (cancelled) return;
         if (dataset.parseStatus !== "error") {
@@ -517,7 +513,7 @@ export default function App() {
             {isDatasetLoading
               ? "Loading dataset…"
               : datasetLoadError
-                ? "Dataset loader failed."
+                ? "Pair loader failed."
               : activeDataset?.parseStatus === "error"
                 ? "Dataset parse failed."
                 : "Pair scan pending or unavailable."}
