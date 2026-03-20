@@ -7,7 +7,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const outputRoot = path.join(repoRoot, 'public', 'preprocessed');
 const manifestOutputPath = path.join(outputRoot, 'manifest.json');
-const officialCsvRoot = path.join(repoRoot, 'dist', 'mnt', 'data');
+const preprocessingInputRoot = path.join(repoRoot, 'dist', 'mnt', 'data');
 const DATASET_VERSION = 'v6';
 const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
 const TIME_HEADER_ALIASES = new Set(['time', 'datetime', 'date', 'timestamp']);
@@ -290,13 +290,69 @@ const resolveCsvSourcePath = (csvFile) => path.join(repoRoot, csvFile.replace(/^
 const toRepoRelativePath = (absolutePath) => path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
 
 const main = async () => {
+  const officialCsvFilesExpected = [
+    'DAT_MT_EURUSD_M1_2025.csv',
+    'DAT_MT_USDCAD_M1_2025.csv',
+    'DAT_MT_GBPUSD_M1_2025.csv',
+    'DAT_MT_AUDUSD_M1_2025.csv',
+  ];
+  let discoveredCsvFiles = [];
+  let preprocessingInputRootExistsResult = false;
+  try {
+    const entries = await readdir(preprocessingInputRoot, { withFileTypes: true });
+    preprocessingInputRootExistsResult = true;
+    discoveredCsvFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
+      .map((entry) => entry.name)
+      .sort();
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      preprocessingInputRootExistsResult = false;
+      discoveredCsvFiles = [];
+    } else {
+      throw error;
+    }
+  }
+
+  const officialCsvFilesFound = officialCsvFilesExpected.filter((fileName) => discoveredCsvFiles.includes(fileName));
+  const officialCsvFilesMissing = officialCsvFilesExpected.filter((fileName) => !officialCsvFilesFound.includes(fileName));
+  const diagnostics = {
+    preprocessingInputRoot: toRepoRelativePath(preprocessingInputRoot),
+    existsPreprocessingInputRoot: preprocessingInputRootExistsResult,
+    discoveredCsvFiles,
+    officialCsvFilesExpected,
+    officialCsvFilesFound,
+    officialCsvFilesMissing,
+    preprocessingSucceededPairs: [],
+    preprocessingFailedPairs: [],
+    failureReasonPerPair: {},
+    manifestOutputPath: toRepoRelativePath(manifestOutputPath),
+    manifestPairKeys: [],
+  };
+  const logDiagnostics = () => {
+    console.log(JSON.stringify({
+      preprocessingInputRoot: diagnostics.preprocessingInputRoot,
+      existsPreprocessingInputRoot: diagnostics.existsPreprocessingInputRoot,
+      discoveredCsvFiles: diagnostics.discoveredCsvFiles,
+      officialCsvFilesExpected: diagnostics.officialCsvFilesExpected,
+      officialCsvFilesFound: diagnostics.officialCsvFilesFound,
+      officialCsvFilesMissing: diagnostics.officialCsvFilesMissing,
+      preprocessingSucceededPairs: diagnostics.preprocessingSucceededPairs,
+      preprocessingFailedPairs: diagnostics.preprocessingFailedPairs,
+      failureReasonPerPair: diagnostics.failureReasonPerPair,
+      manifestOutputPath: diagnostics.manifestOutputPath,
+      manifestPairKeys: diagnostics.manifestPairKeys,
+    }, null, 2));
+  };
+
+  logDiagnostics();
+
+  if (officialCsvFilesMissing.length > 0) {
+    throw new Error(`Missing official CSV file(s): ${officialCsvFilesMissing.join(', ')}`);
+  }
+
   await rm(outputRoot, { recursive: true, force: true });
   await mkdir(outputRoot, { recursive: true });
-
-  const discoveredCsvFiles = (await readdir(officialCsvRoot, { withFileTypes: true }))
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
-    .map((entry) => `staceyreply/dist/mnt/data/${entry.name}`)
-    .sort();
 
   const manifest = {
     datasetVersion: DATASET_VERSION,
@@ -308,13 +364,7 @@ const main = async () => {
       missingOfficialPairs: [],
       missingPairFolders: [],
       skippedPairFolders: [],
-      discoveredCsvFiles,
-      officialCsvFilesExpected: OFFICIAL_PAIRS.map((pair) => pair.csvFile),
-      officialCsvFilesFound: [],
-      preprocessingSucceededPairs: [],
-      preprocessingFailedPairs: [],
-      failureReasonPerPair: {},
-      manifestOutputPath: toRepoRelativePath(manifestOutputPath),
+      ...diagnostics,
     },
     pairs: [],
   };
@@ -323,15 +373,7 @@ const main = async () => {
     const datasetId = `pair:${pair.pairKey}`;
     const sourcePath = resolveCsvSourcePath(pair.csvFile);
     const sourceLabel = pair.csvFile;
-    const discovered = discoveredCsvFiles.includes(pair.csvFile);
-    if (discovered) {
-      manifest.diagnostics.officialCsvFilesFound.push(pair.csvFile);
-    }
-
     try {
-      if (!discovered) {
-        throw new Error(`Official CSV not found at ${sourceLabel}.`);
-      }
       const raw = await readFile(sourcePath, 'utf8');
       const parsed = parseRawCsvDataset({ datasetId, label: pair.displayName, sourceLabel, raw });
       const candidateSummaries = buildCandidateSummaries(parsed, pair.pairKey);
@@ -415,25 +457,21 @@ const main = async () => {
 
   manifest.diagnostics.manifestPairCount = manifest.pairs.length;
   manifest.diagnostics.manifestPairKeys = manifest.pairs.map((pair) => pair.pairKey);
-  manifest.diagnostics.missingOfficialPairs = OFFICIAL_PAIRS.map((pair) => pair.pairKey).filter((pairKey) => !manifest.pairs.some((pair) => pair.pairKey === pairKey));
+  diagnostics.manifestPairKeys = manifest.diagnostics.manifestPairKeys;
+  manifest.diagnostics.missingOfficialPairs = OFFICIAL_PAIRS.map((pair) => pair.pairKey).filter((pairKey) => !manifest.pairs.some((manifestPair) => manifestPair.pairKey === pairKey));
   manifest.diagnostics.missingPairFolders = [...manifest.diagnostics.missingOfficialPairs];
 
-  await writeFile(manifestOutputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  logDiagnostics();
 
-  console.log(JSON.stringify({
-    discoveredCsvFiles: manifest.diagnostics.discoveredCsvFiles,
-    officialCsvFilesExpected: manifest.diagnostics.officialCsvFilesExpected,
-    officialCsvFilesFound: manifest.diagnostics.officialCsvFilesFound,
-    preprocessingSucceededPairs: manifest.diagnostics.preprocessingSucceededPairs,
-    preprocessingFailedPairs: manifest.diagnostics.preprocessingFailedPairs,
-    failureReasonPerPair: manifest.diagnostics.failureReasonPerPair,
-    manifestOutputPath: manifest.diagnostics.manifestOutputPath,
-    manifestPairKeys: manifest.diagnostics.manifestPairKeys,
-  }, null, 2));
+  if (manifest.diagnostics.preprocessingFailedPairs.length > 0) {
+    throw new Error(`Failed preprocessing pair(s): ${manifest.diagnostics.preprocessingFailedPairs.join(', ')}`);
+  }
 
   if (manifest.diagnostics.missingOfficialPairs.length > 0) {
     throw new Error(`Missing official pair(s): ${manifest.diagnostics.missingOfficialPairs.join(', ')}`);
   }
+
+  await writeFile(manifestOutputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
   console.log(`Preprocessed ${manifest.pairs.length} official pair(s) into public/preprocessed.`);
 };
