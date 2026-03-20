@@ -80,6 +80,16 @@ export interface ParsedDataset {
   parseDiagnostics: string[];
 }
 
+export type DatasetLoadFailurePhase = "file-read" | "parse" | "analysis-setup";
+
+export interface DatasetLoadErrorInfo {
+  datasetId: string;
+  datasetLabel: string;
+  sourceLabel: string;
+  phase: DatasetLoadFailurePhase;
+  message: string;
+}
+
 export interface DatasetValidationIssue {
   code:
     | "missing-pump-context"
