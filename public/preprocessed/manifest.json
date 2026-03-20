@@ -1,15 +1,15 @@
 {
   "datasetVersion": "v4",
-  "generatedAt": "2026-03-20T03:01:49.156Z",
+  "generatedAt": "2026-03-20T03:40:34.274Z",
   "pairs": [
     {
       "id": "pair:sample-1m",
       "label": "SAMPLE-1M",
       "sourceLabel": "data/pairs/sample-1m/raw/1m.csv",
       "indexPath": "preprocessed/sample-1m/index.json",
-      "candidateCount": 0,
+      "candidateCount": 1,
       "dateRange": {
-        "start": "2024-01-03",
+        "start": "2024-01-01",
         "end": "2024-01-03"
       },
       "datasetVersion": "v4"

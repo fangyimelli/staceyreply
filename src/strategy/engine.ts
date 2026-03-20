@@ -455,7 +455,14 @@ export const scanCandidateTradeDays = (datasetId: string, symbol: string, bars1m
   const days = Object.keys(byNyDate(bars1m)).sort();
   return days.slice(2).map((tradeDay) => {
     const analysis = buildReplayDatasetAnalysis(datasetId, symbol, bars1m, tradeDay, undefined);
-    return { date: tradeDay, template: analysis.template, practiceStatus: resolvePracticeStatus(analysis.template, analysis.invalidReasons), valid: !analysis.invalidReasons.length && analysis.template !== "INCOMPLETE", shortSummary: summarizeCandidate(analysis.template, analysis.invalidReasons, analysis.missingConditions) };
+    return {
+      eventId: tradeDay,
+      date: tradeDay,
+      template: analysis.template,
+      practiceStatus: resolvePracticeStatus(analysis.template, analysis.invalidReasons),
+      valid: !analysis.invalidReasons.length && analysis.template !== "INCOMPLETE",
+      shortSummary: summarizeCandidate(analysis.template, analysis.invalidReasons, analysis.missingConditions),
+    };
   });
 };
 

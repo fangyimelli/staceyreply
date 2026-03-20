@@ -7,6 +7,7 @@ import type {
 } from '../types/domain';
 
 const MANIFEST_URL = '/preprocessed/manifest.json';
+const normalizeAssetPath = (value: string) => value.replace(/^\/+/, '');
 
 export class DatasetLoadError extends Error {
   datasetId: string;
@@ -78,26 +79,79 @@ export const getPreprocessedDatasetManifest = async (): Promise<DatasetManifestI
     datasetLabel: 'manifest',
     sourceLabel: MANIFEST_URL,
   });
+  console.debug('[ReplayLoader] manifest loaded', {
+    path: MANIFEST_URL,
+    pairCount: manifest.pairs.length,
+  });
   return manifest.pairs;
 };
 
 export const loadPairCandidateIndex = async (
   manifest: DatasetManifestItem,
-): Promise<PairCandidateIndex> =>
-  loadJson<PairCandidateIndex>({
-    url: `/${manifest.indexPath}`,
+): Promise<PairCandidateIndex> => {
+  const indexPath = normalizeAssetPath(manifest.indexPath);
+  const pairIndex = await loadJson<PairCandidateIndex>({
+    url: `/${indexPath}`,
     datasetId: manifest.id,
     datasetLabel: manifest.label,
-    sourceLabel: manifest.indexPath,
+    sourceLabel: indexPath,
   });
+  console.debug('[ReplayLoader] pair index fetched', {
+    pairId: manifest.id,
+    indexPath,
+    candidateCount: pairIndex.candidates.length,
+  });
+  const invalidCandidate = pairIndex.candidates.find(
+    (candidate) =>
+      typeof candidate.eventId !== 'string' ||
+      typeof candidate.candidateDate !== 'string' ||
+      typeof candidate.template !== 'string' ||
+      typeof candidate.datasetPath !== 'string',
+  );
+  if (invalidCandidate) {
+    throw new DatasetLoadError({
+      datasetId: manifest.id,
+      datasetLabel: manifest.label,
+      sourceLabel: indexPath,
+      phase: 'parse',
+      message: 'Pair index is malformed: candidates must include eventId, candidateDate, template, and datasetPath.',
+    });
+  }
+  return pairIndex;
+};
 
 export const loadReplayEventDataset = async (
   manifest: DatasetManifestItem,
   datasetPath: string,
-): Promise<PreprocessedReplayEventDataset> =>
-  loadJson<PreprocessedReplayEventDataset>({
-    url: `/${datasetPath}`,
+): Promise<PreprocessedReplayEventDataset> => {
+  const normalizedDatasetPath = normalizeAssetPath(datasetPath);
+  console.debug('[ReplayLoader] event payload fetch path', {
+    pairId: manifest.id,
+    datasetPath: normalizedDatasetPath,
+  });
+  const dataset = await loadJson<PreprocessedReplayEventDataset>({
+    url: `/${normalizedDatasetPath}`,
     datasetId: manifest.id,
     datasetLabel: manifest.label,
-    sourceLabel: datasetPath,
+    sourceLabel: normalizedDatasetPath,
   });
+  if ((!Array.isArray(dataset.bars1m) || dataset.bars1m.length === 0) && Array.isArray(dataset.bars)) {
+    dataset.bars1m = dataset.bars;
+  }
+  const resolvedBars = Array.isArray(dataset.bars1m) ? dataset.bars1m : [];
+  console.debug('[ReplayLoader] event payload parse result', {
+    eventId: dataset.eventId,
+    bars1m: resolvedBars.length,
+    parseStatus: dataset.parseStatus,
+  });
+  if (!Array.isArray(dataset.bars1m) || dataset.bars1m.length === 0) {
+    throw new DatasetLoadError({
+      datasetId: manifest.id,
+      datasetLabel: manifest.label,
+      sourceLabel: normalizedDatasetPath,
+      phase: 'parse',
+      message: 'Event payload missing or malformed: expected non-empty bars1m array.',
+    });
+  }
+  return dataset;
+};
