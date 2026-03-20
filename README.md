@@ -4,7 +4,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 
 ## Confirmed features
 
-- 正式 pair universe 固定為 `EURUSD` / `USDCAD` / `GBPUSD` / `AUDUSD`；正式模式只接受這 4 個 pair，並從 `dist/mnt/data/*.csv` 對應檔案預處理
+- 正式 pair universe 固定為 `EURUSD` / `USDCAD` / `GBPUSD` / `AUDUSD`；正式模式只接受這 4 個 pair，並由單一 official config 集中定義 `dist/mnt/data` input root、固定檔名與 FX metadata 後再預處理
 - 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars，並為每個候選事件預先輸出 5m / 15m / 1h / 4h / 1D bars 到單一 event replay dataset 產物
 - app 啟動時只讀 `public/preprocessed/manifest.json`，選 pair 時只讀對應 `index.json`，選中候選事件後才讀單一 event dataset，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
 - `index.json` 僅保留候選事件摘要欄位：`eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`；完整 `bars` / annotations / trace 只存在單一 event dataset 檔案
@@ -52,8 +52,8 @@ npm run dev
 
 重點如下：
 
-1. 正式原始資料固定來自 `dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv`、`DAT_MT_USDCAD_M1_2025.csv`、`DAT_MT_GBPUSD_M1_2025.csv`、`DAT_MT_AUDUSD_M1_2025.csv`
-2. 預處理腳本只處理這 4 個官方 CSV，不再依賴資料夾掃描
+1. 正式原始資料固定來自 single official config 對應的 `dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv`、`DAT_MT_USDCAD_M1_2025.csv`、`DAT_MT_GBPUSD_M1_2025.csv`、`DAT_MT_AUDUSD_M1_2025.csv`
+2. 預處理腳本只處理這 4 個官方 CSV，不再依賴資料夾掃描，也不再用字串 replace 推導 source path
 3. 輸出 `public/preprocessed/manifest.json`、`public/preprocessed/<pair>/index.json` 與 `public/preprocessed/<pair>/events/<eventId>.json`
 4. app 依序 lazy-load 預處理結果，正式模式不會 fallback 到 sample-1m
 
@@ -65,14 +65,16 @@ npm run preprocess:data
 
 流程：
 
-1. 依 `OFFICIAL_PAIRS` registry 固定處理 `eurusd` / `usdcad` / `gbpusd` / `audusd` 4 個 CSV
+1. 依 single official config / `OFFICIAL_PAIRS` registry 固定處理 `eurusd` / `usdcad` / `gbpusd` / `audusd` 4 個 CSV
 2. parser 讀取 raw CSV 並轉成標準 1m bars
-3. 寫出 `public/preprocessed/manifest.json`，其中包含 official pair universe / manifest pair keys / missing official pairs / skipped pair folders diagnostics
+3. 寫出 `public/preprocessed/manifest.json`，其中包含 official pair universe / manifest pair keys / missing official pairs / skipped pair folders diagnostics，以及 `process.cwd()`、`repoRoot`、`preprocessingInputRoot`、`manifestOutputPath`、`outputRootExists`
 4. 針對每個 official pair 寫出 `public/preprocessed/<pair-slug>/index.json`
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
-6. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
-7. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
-8. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
+6. manifest `indexPath` 與 candidate `datasetPath` 一律寫成 `public/preprocessed/<pair>/...` 對應的 web path
+7. official manifest 產出後，會額外驗證 4 個 pair 的 `index.json` 與每個 `events/` 目錄至少一個 preprocessing 產出的 JSON event 檔；任何一項缺失都視為整體失敗
+8. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
+9. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
+10. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
 
 ## Pair switching
 

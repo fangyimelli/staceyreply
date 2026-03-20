@@ -1,0 +1,34 @@
+{
+  "preprocessing": {
+    "inputRootSegments": ["dist", "mnt", "data"]
+  },
+  "defaults": {
+    "assetClass": "fx",
+    "pipSize": 0.0001,
+    "tickSize": 0.00001,
+    "preferredStopPips": 15,
+    "maxStopPips": 20
+  },
+  "pairs": [
+    {
+      "pairKey": "eurusd",
+      "displayName": "EURUSD",
+      "fileName": "DAT_MT_EURUSD_M1_2025.csv"
+    },
+    {
+      "pairKey": "usdcad",
+      "displayName": "USDCAD",
+      "fileName": "DAT_MT_USDCAD_M1_2025.csv"
+    },
+    {
+      "pairKey": "gbpusd",
+      "displayName": "GBPUSD",
+      "fileName": "DAT_MT_GBPUSD_M1_2025.csv"
+    },
+    {
+      "pairKey": "audusd",
+      "displayName": "AUDUSD",
+      "fileName": "DAT_MT_AUDUSD_M1_2025.csv"
+    }
+  ]
+}

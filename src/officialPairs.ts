@@ -1,48 +1,29 @@
+import officialConfig from "./config/official-config.json";
 import type { InstrumentMeta } from "./types/domain";
 
-export interface OfficialPairDefinition {
-  displayName: string;
-  pairKey: string;
+type OfficialConfig = typeof officialConfig;
+type OfficialConfigPair = OfficialConfig["pairs"][number];
+
+export interface OfficialPairDefinition extends OfficialConfigPair {
+  assetClass: InstrumentMeta["assetClass"];
+  pipSize: OfficialConfig["defaults"]["pipSize"];
+  tickSize: OfficialConfig["defaults"]["tickSize"];
+  preferredStopPips: OfficialConfig["defaults"]["preferredStopPips"];
+  maxStopPips: OfficialConfig["defaults"]["maxStopPips"];
   csvFile: string;
-  assetClass: "fx";
-  pipSize: number;
-  tickSize: number;
 }
 
-export const OFFICIAL_PAIRS: OfficialPairDefinition[] = [
-  {
-    displayName: "EURUSD",
-    pairKey: "eurusd",
-    csvFile: "staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv",
-    assetClass: "fx",
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-  {
-    displayName: "USDCAD",
-    pairKey: "usdcad",
-    csvFile: "staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv",
-    assetClass: "fx",
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-  {
-    displayName: "GBPUSD",
-    pairKey: "gbpusd",
-    csvFile: "staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv",
-    assetClass: "fx",
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-  {
-    displayName: "AUDUSD",
-    pairKey: "audusd",
-    csvFile: "staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv",
-    assetClass: "fx",
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-];
+export const OFFICIAL_PREPROCESSING_INPUT_ROOT = officialConfig.preprocessing.inputRootSegments.join("/");
+
+export const OFFICIAL_PAIRS: OfficialPairDefinition[] = officialConfig.pairs.map((pair) => ({
+  ...pair,
+  assetClass: "fx",
+  pipSize: officialConfig.defaults.pipSize,
+  tickSize: officialConfig.defaults.tickSize,
+  preferredStopPips: officialConfig.defaults.preferredStopPips,
+  maxStopPips: officialConfig.defaults.maxStopPips,
+  csvFile: `${OFFICIAL_PREPROCESSING_INPUT_ROOT}/${pair.fileName}`,
+}));
 
 export const OFFICIAL_PAIR_KEYS = OFFICIAL_PAIRS.map((pair) => pair.pairKey);
 
@@ -61,8 +42,8 @@ export const buildOfficialInstrumentMeta = (pairKey: string): InstrumentMeta | n
     tickSize: pair.tickSize,
     pipSize: pair.pipSize,
     pointSize: pair.tickSize,
-    preferredStopPips: 15,
-    maxStopPips: 20,
-    maxStopPoints: 200,
+    preferredStopPips: pair.preferredStopPips,
+    maxStopPips: pair.maxStopPips,
+    maxStopPoints: pair.maxStopPips * (pair.pipSize / pair.tickSize),
   };
 };

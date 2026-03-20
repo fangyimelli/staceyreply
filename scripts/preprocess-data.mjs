@@ -1,57 +1,32 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import officialConfig from '../src/config/official-config.json' with { type: 'json' };
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const outputRoot = path.join(repoRoot, 'public', 'preprocessed');
 const manifestOutputPath = path.join(outputRoot, 'manifest.json');
-const preprocessingInputRoot = path.join(repoRoot, 'dist', 'mnt', 'data');
+const preprocessingInputRoot = path.join(repoRoot, ...officialConfig.preprocessing.inputRootSegments);
 const DATASET_VERSION = 'v6';
 const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
 const TIME_HEADER_ALIASES = new Set(['time', 'datetime', 'date', 'timestamp']);
 const VOLUME_HEADER_ALIASES = new Set(['volume', 'vol']);
-
-const OFFICIAL_PAIRS = [
-  {
-    displayName: 'EURUSD',
-    pairKey: 'eurusd',
-    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv',
-    fileName: 'DAT_MT_EURUSD_M1_2025.csv',
-    assetClass: 'fx',
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-  {
-    displayName: 'USDCAD',
-    pairKey: 'usdcad',
-    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv',
-    fileName: 'DAT_MT_USDCAD_M1_2025.csv',
-    assetClass: 'fx',
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-  {
-    displayName: 'GBPUSD',
-    pairKey: 'gbpusd',
-    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv',
-    fileName: 'DAT_MT_GBPUSD_M1_2025.csv',
-    assetClass: 'fx',
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-  {
-    displayName: 'AUDUSD',
-    pairKey: 'audusd',
-    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv',
-    fileName: 'DAT_MT_AUDUSD_M1_2025.csv',
-    assetClass: 'fx',
-    pipSize: 0.0001,
-    tickSize: 0.00001,
-  },
-];
-
+const OFFICIAL_DATASET_DEFAULTS = {
+  assetClass: officialConfig.defaults.assetClass,
+  pipSize: officialConfig.defaults.pipSize,
+  tickSize: officialConfig.defaults.tickSize,
+  preferredStopPips: officialConfig.defaults.preferredStopPips,
+  maxStopPips: officialConfig.defaults.maxStopPips,
+};
+const OFFICIAL_PAIRS = officialConfig.pairs.map((pair) => ({
+  ...pair,
+  ...OFFICIAL_DATASET_DEFAULTS,
+  sourcePath: path.join(preprocessingInputRoot, pair.fileName),
+}));
+const OFFICIAL_PAIR_KEYS = OFFICIAL_PAIRS.map((pair) => pair.pairKey);
+const OFFICIAL_CSV_FILES_EXPECTED = OFFICIAL_PAIRS.map((pair) => pair.fileName);
 const replayTimeframes = ['1m', '5m', '15m', '1h', '4h', '1D'];
 const minutesByTf = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
 
@@ -259,7 +234,8 @@ const slicePrecomputedTimeframeBars = (fullTimeframeBars, windowDays) => {
   ]));
 };
 
-const buildCandidateSummaries = (parsed, pairSlug) => {
+const toWebPath = (...segments) => path.posix.join('preprocessed', ...segments);
+const buildCandidateSummaries = (parsed, pairKey) => {
   const barsByDay = groupByNyDate(parsed.bars1m);
   const days = Object.keys(barsByDay).sort();
   const daily = buildDailyBars(barsByDay, days);
@@ -273,7 +249,7 @@ const buildCandidateSummaries = (parsed, pairSlug) => {
     const template = fgd ? 'FGD' : frd ? 'FRD' : null;
     if (!template) return [];
     const eventId = buildEventId(tradeDay.day, template);
-    return [{ eventId, candidateDate: tradeDay.day, template, shortSummary: summarizeCandidate(template), practiceStatus: 'needs-practice', datasetPath: `preprocessed/${pairSlug}/events/${eventId}.json` }];
+    return [{ eventId, candidateDate: tradeDay.day, template, shortSummary: summarizeCandidate(template), practiceStatus: 'needs-practice', datasetPath: toWebPath(pairKey, 'events', `${eventId}.json`) }];
   });
 };
 const sliceEventWindow = (bars, candidateDate) => {
@@ -286,53 +262,84 @@ const sliceEventWindow = (bars, candidateDate) => {
   return { windowDays, bars: windowDays.flatMap((day) => barsByDay[day]) };
 };
 
-const resolveCsvSourcePath = (csvFile) => path.join(repoRoot, csvFile.replace(/^staceyreply\//, ''));
 const toRepoRelativePath = (absolutePath) => path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
+const pathExists = async (targetPath) => {
+  try {
+    await access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const verifyOfficialManifestIntegrity = async () => {
+  const failures = [];
+  for (const pair of OFFICIAL_PAIRS) {
+    const pairOutputRoot = path.join(outputRoot, pair.pairKey);
+    const indexFilePath = path.join(pairOutputRoot, 'index.json');
+    const eventsRoot = path.join(pairOutputRoot, 'events');
+    const hasIndex = await pathExists(indexFilePath);
+    if (!hasIndex) {
+      failures.push(`${pair.pairKey}: missing ${toRepoRelativePath(indexFilePath)}`);
+      continue;
+    }
+    let eventFiles = [];
+    try {
+      eventFiles = (await readdir(eventsRoot, { withFileTypes: true }))
+        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.json'))
+        .map((entry) => entry.name);
+    } catch {
+      eventFiles = [];
+    }
+    if (eventFiles.length === 0) {
+      failures.push(`${pair.pairKey}: missing preprocessing event JSON files in ${toRepoRelativePath(eventsRoot)}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(`Official manifest integrity check failed: ${failures.join('; ')}`);
+  }
+};
 
 const main = async () => {
-  const officialCsvFilesExpected = [
-    'DAT_MT_EURUSD_M1_2025.csv',
-    'DAT_MT_USDCAD_M1_2025.csv',
-    'DAT_MT_GBPUSD_M1_2025.csv',
-    'DAT_MT_AUDUSD_M1_2025.csv',
-  ];
   let discoveredCsvFiles = [];
-  let preprocessingInputRootExistsResult = false;
+  const outputRootExists = await pathExists(outputRoot);
   try {
     const entries = await readdir(preprocessingInputRoot, { withFileTypes: true });
-    preprocessingInputRootExistsResult = true;
     discoveredCsvFiles = entries
       .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.csv'))
       .map((entry) => entry.name)
       .sort();
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      preprocessingInputRootExistsResult = false;
       discoveredCsvFiles = [];
     } else {
       throw error;
     }
   }
 
-  const officialCsvFilesFound = officialCsvFilesExpected.filter((fileName) => discoveredCsvFiles.includes(fileName));
-  const officialCsvFilesMissing = officialCsvFilesExpected.filter((fileName) => !officialCsvFilesFound.includes(fileName));
+  const officialCsvFilesFound = OFFICIAL_CSV_FILES_EXPECTED.filter((fileName) => discoveredCsvFiles.includes(fileName));
+  const officialCsvFilesMissing = OFFICIAL_CSV_FILES_EXPECTED.filter((fileName) => !officialCsvFilesFound.includes(fileName));
   const diagnostics = {
-    preprocessingInputRoot: toRepoRelativePath(preprocessingInputRoot),
-    existsPreprocessingInputRoot: preprocessingInputRootExistsResult,
+    processCwd: process.cwd(),
+    repoRoot,
+    preprocessingInputRoot,
+    outputRootExists,
     discoveredCsvFiles,
-    officialCsvFilesExpected,
+    officialCsvFilesExpected: OFFICIAL_CSV_FILES_EXPECTED,
     officialCsvFilesFound,
     officialCsvFilesMissing,
     preprocessingSucceededPairs: [],
     preprocessingFailedPairs: [],
     failureReasonPerPair: {},
-    manifestOutputPath: toRepoRelativePath(manifestOutputPath),
+    manifestOutputPath,
     manifestPairKeys: [],
   };
   const logDiagnostics = () => {
     console.log(JSON.stringify({
+      processCwd: diagnostics.processCwd,
+      repoRoot: diagnostics.repoRoot,
       preprocessingInputRoot: diagnostics.preprocessingInputRoot,
-      existsPreprocessingInputRoot: diagnostics.existsPreprocessingInputRoot,
+      manifestOutputPath: diagnostics.manifestOutputPath,
+      outputRootExists: diagnostics.outputRootExists,
       discoveredCsvFiles: diagnostics.discoveredCsvFiles,
       officialCsvFilesExpected: diagnostics.officialCsvFilesExpected,
       officialCsvFilesFound: diagnostics.officialCsvFilesFound,
@@ -340,7 +347,6 @@ const main = async () => {
       preprocessingSucceededPairs: diagnostics.preprocessingSucceededPairs,
       preprocessingFailedPairs: diagnostics.preprocessingFailedPairs,
       failureReasonPerPair: diagnostics.failureReasonPerPair,
-      manifestOutputPath: diagnostics.manifestOutputPath,
       manifestPairKeys: diagnostics.manifestPairKeys,
     }, null, 2));
   };
@@ -359,7 +365,7 @@ const main = async () => {
     generatedAt: new Date().toISOString(),
     diagnostics: {
       manifestPairCount: 0,
-      officialPairUniverse: OFFICIAL_PAIRS.map((pair) => pair.pairKey),
+      officialPairUniverse: OFFICIAL_PAIR_KEYS,
       manifestPairKeys: [],
       missingOfficialPairs: [],
       missingPairFolders: [],
@@ -371,8 +377,8 @@ const main = async () => {
 
   for (const pair of OFFICIAL_PAIRS) {
     const datasetId = `pair:${pair.pairKey}`;
-    const sourcePath = resolveCsvSourcePath(pair.csvFile);
-    const sourceLabel = pair.csvFile;
+    const sourcePath = pair.sourcePath;
+    const sourceLabel = toRepoRelativePath(sourcePath);
     try {
       const raw = await readFile(sourcePath, 'utf8');
       const parsed = parseRawCsvDataset({ datasetId, label: pair.displayName, sourceLabel, raw });
@@ -409,7 +415,7 @@ const main = async () => {
         await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload)}\n`, 'utf8');
       }
 
-      const indexPath = `preprocessed/${pair.pairKey}/index.json`;
+      const indexPath = toWebPath(pair.pairKey, 'index.json');
       const pairIndex = {
         pairId: datasetId,
         pairLabel: pair.displayName,
@@ -458,7 +464,7 @@ const main = async () => {
   manifest.diagnostics.manifestPairCount = manifest.pairs.length;
   manifest.diagnostics.manifestPairKeys = manifest.pairs.map((pair) => pair.pairKey);
   diagnostics.manifestPairKeys = manifest.diagnostics.manifestPairKeys;
-  manifest.diagnostics.missingOfficialPairs = OFFICIAL_PAIRS.map((pair) => pair.pairKey).filter((pairKey) => !manifest.pairs.some((manifestPair) => manifestPair.pairKey === pairKey));
+  manifest.diagnostics.missingOfficialPairs = OFFICIAL_PAIR_KEYS.filter((pairKey) => !manifest.pairs.some((manifestPair) => manifestPair.pairKey === pairKey));
   manifest.diagnostics.missingPairFolders = [...manifest.diagnostics.missingOfficialPairs];
 
   logDiagnostics();
@@ -472,6 +478,7 @@ const main = async () => {
   }
 
   await writeFile(manifestOutputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  await verifyOfficialManifestIntegrity();
 
   console.log(`Preprocessed ${manifest.pairs.length} official pair(s) into public/preprocessed.`);
 };

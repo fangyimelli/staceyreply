@@ -1,6 +1,6 @@
 # `data/` directory contract
 
-正式模式現在使用**固定官方 pair registry**，不再把任意 `data/pairs/*` 掃描結果當成正式資料來源。
+正式模式現在使用**固定官方 pair registry / single official config**，不再把任意 `data/pairs/*` 掃描結果當成正式資料來源。
 
 ## Official pair universe
 
@@ -53,12 +53,14 @@ npm run preprocess:data
 
 會：
 
-1. 依 `OFFICIAL_PAIRS` registry 逐一讀取官方 CSV
+1. 依 `OFFICIAL_PAIRS` registry 與 single official config 逐一讀取官方 CSV
 2. 產生 `manifest.json`
 3. 為每個 official pair 產生 `index.json`
 4. 為每個候選事件產生 `events/<eventId>.json`
-5. 在 diagnostics 內列出 `officialPairUniverse`、`manifestPairKeys`、`missingOfficialPairs`
-6. 若缺任何 official pair，直接報錯，而不是靜默忽略
+5. 在 diagnostics 內列出 `process.cwd()`、`repoRoot`、`preprocessingInputRoot`、`manifestOutputPath`、`outputRootExists`、`officialPairUniverse`、`manifestPairKeys`、`missingOfficialPairs`
+6. `indexPath` 與 `datasetPath` 會固定寫成 `public/preprocessed/<pair>/...` 對應的 web path
+7. official manifest 產出後，會驗證 4 個 pair 的 `index.json` 與每個 pair `events/` 目錄至少一個 preprocessing 產出的 JSON event 檔
+8. 若缺任何 official pair 或完整性檢查失敗，直接報錯，而不是靜默忽略
 
 ## Sample mode
 

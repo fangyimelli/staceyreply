@@ -71,7 +71,11 @@ export interface DatasetManifestDiagnostics {
   preprocessingSucceededPairs: string[];
   preprocessingFailedPairs: string[];
   failureReasonPerPair: Record<string, string>;
+  processCwd: string;
+  repoRoot: string;
+  preprocessingInputRoot: string;
   manifestOutputPath: string;
+  outputRootExists: boolean;
 }
 
 export interface DatasetManifestItem {
