@@ -1,6 +1,7 @@
 import { aggregateBars, buildTimeframeBarMap, replayTimeframes } from "../aggregation/timeframe";
 import type {
   Annotation,
+  BacktestSignalSnapshot,
   CandidateTradeDay,
   EventLogItem,
   OhlcvBar,
@@ -10,16 +11,17 @@ import type {
   ReplayStageId,
   ReplayVisibility,
   RuleTraceItem,
+  TemplateType,
   TimeframeBarMap,
   TradeLevel,
+  TradeSide,
+  UnifiedFeatureCategory,
+  UnifiedHardGate,
+  UnifiedSignalDayStrategy,
+  UnifiedTemplateType,
+  UnifiedWeightedFeature,
 } from "../types/domain";
-import {
-  byNyDate,
-  strategyNyDate,
-  strategyNyLabel,
-  strategyNyTime,
-  strategyTime,
-} from "../utils/nyDate";
+import { byNyDate, strategyNyDate, strategyNyLabel, strategyNyTime, strategyTime } from "../utils/nyDate";
 import { validateDataset } from "../validation/datasetValidation";
 
 const ema = (bars: OhlcvBar[], period: number) => {
@@ -31,54 +33,25 @@ const ema = (bars: OhlcvBar[], period: number) => {
   });
 };
 const pips = (value: number) => Math.round(value / 0.0001);
-const inNySession = (bar: OhlcvBar) =>
-  strategyNyTime(strategyTime(bar)) >= "07:00" &&
-  strategyNyTime(strategyTime(bar)) <= "11:00";
-const id = (stage: ReplayStageId, suffix: string) => `${stage}-${suffix}`;
-const sliceBarsThroughTradeDay = (bars1m: OhlcvBar[], selectedTradeDay: string) =>
-  bars1m.filter((bar) => strategyNyDate(strategyTime(bar)) <= selectedTradeDay);
-const sliceTimeframeBarMapThroughTradeDay = (
-  timeframeBars: Partial<TimeframeBarMap> | undefined,
-  selectedTradeDay: string,
-): Partial<TimeframeBarMap> =>
-  Object.fromEntries(
-    replayTimeframes.map((timeframe) => [
-      timeframe,
-      (timeframeBars?.[timeframe] ?? []).filter(
-        (bar) => strategyNyDate(strategyTime(bar)) <= selectedTradeDay,
-      ),
-    ]),
-  ) as Partial<TimeframeBarMap>;
-const buildReplayTimeframeBars = (
-  scopedBars1m: OhlcvBar[],
-  precomputedTimeframeBars?: Partial<TimeframeBarMap>,
-): TimeframeBarMap => {
-  const runtimeFallback = buildTimeframeBarMap(scopedBars1m);
-  return Object.fromEntries(
-    replayTimeframes.map((timeframe) => {
-      const precomputed = precomputedTimeframeBars?.[timeframe];
-      return [timeframe, Array.isArray(precomputed) && precomputed.length > 0 ? precomputed : runtimeFallback[timeframe]];
-    }),
-  ) as TimeframeBarMap;
+const inNySession = (bar: OhlcvBar) => strategyNyTime(strategyTime(bar)) >= "07:00" && strategyNyTime(strategyTime(bar)) <= "11:00";
+const entryWindowOpen = (bar?: OhlcvBar) => {
+  const t = bar ? strategyNyTime(strategyTime(bar)) : "";
+  return t >= "07:00" && t <= "08:30";
 };
-const summarizeCandidate = (
-  template: ReplayDatasetAnalysis["template"],
-  invalidReasons: string[],
-  missingConditions: string[],
-) => {
+const id = (stage: ReplayStageId, suffix: string) => `${stage}-${suffix}`;
+const featureCategoryOrder: UnifiedFeatureCategory[] = ["template-edge", "session-location", "entry-confirmation", "quality-behavior"];
+const blockedTargetLevels = (template: TemplateType, reason: string): TradeLevel[] =>
+  ([30, 35, 40, 50] as const).map((tier) => ({ tier, price: 0, eligible: false, hit: false, status: template === "INVALID" ? "blocked" : "pending", reason, missingGate: reason }));
+
+const summarizeCandidate = (template: TemplateType, invalidReasons: string[], missingConditions: string[]) => {
   if (invalidReasons.length) return invalidReasons[0];
   if (template === "FGD") return "FGD candidate detected for Day 3 review.";
-  if (template === "FRD") return "FRD candidate detected for Day 3 review.";
+  if (template === "FRD" || template === "FRD_INSIDE") return `${template} candidate detected for Day 3 review.`;
   return missingConditions[0] ?? "Day 3 template is incomplete.";
 };
-const resolvePracticeStatus = (
-  template: ReplayDatasetAnalysis["template"],
-  invalidReasons: string[],
-): PracticeStatus => {
+const resolvePracticeStatus = (template: TemplateType, invalidReasons: string[]): PracticeStatus => {
   if (invalidReasons.length || template === "INVALID") return "filtered-out";
-  return template === "FGD" || template === "FRD"
-    ? "needs-practice"
-    : "auto-only";
+  return template === "FGD" || template === "FRD" || template === "FRD_INSIDE" ? "needs-practice" : "auto-only";
 };
 
 const makeEvent = (
@@ -90,18 +63,8 @@ const makeEvent = (
   trace: RuleTraceItem[],
   barTime?: string,
   prices?: Record<string, number>,
-): EventLogItem => ({
-  id: id(stage, String(visibleFromIndex)),
-  stage,
-  title,
-  summary,
-  detail,
-  statusBanner: title,
-  visibleFromIndex,
-  barTime,
-  prices,
-  trace,
-});
+): EventLogItem => ({ id: id(stage, String(visibleFromIndex)), stage, title, summary, detail, statusBanner: title, visibleFromIndex, barTime, prices, trace });
+
 const makeAnnotation = (
   kind: Annotation["kind"],
   index: number,
@@ -110,94 +73,136 @@ const makeAnnotation = (
   label: string,
   reasoning: string,
   trace: RuleTraceItem[],
-): Annotation => ({
-  id: `${kind}-${barTime}`,
-  kind,
-  barTime,
-  price,
-  label,
-  reasoning,
-  trace,
-  visibleFromIndex: index,
-});
-const pushTraceEvent = (
-  eventLog: EventLogItem[],
-  ruleTrace: RuleTraceItem[],
-  event: EventLogItem,
-) => {
-  ruleTrace.push(...event.trace);
-  eventLog.push(event);
+): Annotation => ({ id: `${kind}-${barTime}`, kind, barTime, price, label, reasoning, trace, visibleFromIndex: index });
+
+const featureWeightForTemplate = (feature: { weightFGD: number; weightFRD: number }, templateType?: UnifiedTemplateType) =>
+  templateType === "FGD" ? feature.weightFGD : feature.weightFRD;
+
+interface StrategyContext {
+  templateType?: UnifiedTemplateType;
+  template: TemplateType;
+  direction: TradeSide;
+  d1?: OhlcvBar;
+  d2?: OhlcvBar;
+  tradeGroup: OhlcvBar[];
+  session: OhlcvBar[];
+  five: OhlcvBar[];
+  ema5: number[];
+  sourceBar?: OhlcvBar;
+  sourcePrice?: number;
+  sourceLocationLabel: string;
+  stopHuntBar?: OhlcvBar;
+  peakBar?: OhlcvBar;
+  engulfmentBar?: OhlcvBar;
+  pinBar?: OhlcvBar;
+  pattern123Ready: boolean;
+  emaConfirmBar?: OhlcvBar;
+  entryBar?: OhlcvBar;
+  entryPrice?: number;
+  stopPrice?: number;
+  stopDistancePips?: number;
+  previousClose?: number;
+  sourceToPrevClosePips?: number;
+  sessionLabel: "newYorkSession" | "londonSession" | "asiaSession";
+  d1BodyPips?: number;
+  d1BodyPctRange?: number;
+  insideDay: boolean;
+  firstHourTouchedPrevClose: boolean;
+  roundNumberConfluence: boolean;
+  strikeZoneConfluence: boolean;
+  immediateFollowThrough: boolean;
+}
+
+const scoreBandFor = (score: number) => {
+  if (score >= 75) return "textbook" as const;
+  if (score >= 60) return "valid" as const;
+  if (score >= 45) return "aggressive" as const;
+  return "no-trade" as const;
 };
 
-const datasetBlocksStageEngine = (analysis: {
-  invalidReasons: string[];
-  template: ReplayDatasetAnalysis["template"];
-}) => analysis.invalidReasons.length > 0 || analysis.template === "INCOMPLETE";
+const buildWeightedFeatures = (ctx: StrategyContext): UnifiedWeightedFeature[] => {
+  const features: Array<Omit<UnifiedWeightedFeature, "contribution">> = [
+    { key: "baselineTemplate", label: "Baseline template", value: ctx.templateType ?? "none", active: Boolean(ctx.templateType), weightFGD: 10, weightFRD: 10, category: "template-edge" },
+    { key: "insideDay", label: "Inside day", value: ctx.insideDay, active: ctx.insideDay, weightFGD: 4, weightFRD: 15, category: "template-edge" },
+    { key: "d1BodyPipsGE40", label: "D-1 body >= 40 pips", value: ctx.d1BodyPips ?? 0, active: (ctx.d1BodyPips ?? 0) >= 40, weightFGD: 15, weightFRD: 0, category: "template-edge" },
+    { key: "d1BodyPctRangeGE60", label: "D-1 body >= 60% range", value: ctx.d1BodyPctRange ?? 0, active: (ctx.d1BodyPctRange ?? 0) >= 60, weightFGD: 15, weightFRD: 0, category: "template-edge" },
+    { key: "sourceToPrevCloseLE10", label: "Source to previous close <= 10 pips", value: ctx.sourceToPrevClosePips ?? "n/a", active: (ctx.sourceToPrevClosePips ?? Infinity) <= 10, weightFGD: 2, weightFRD: 10, category: "template-edge" },
+    { key: "sourceToPrevCloseLE5", label: "Source to previous close <= 5 pips", value: ctx.sourceToPrevClosePips ?? "n/a", active: (ctx.sourceToPrevClosePips ?? Infinity) <= 5, weightFGD: 2, weightFRD: 10, category: "template-edge" },
+    { key: "firstHourTouchedPrevClose", label: "First hour touched previous close", value: ctx.firstHourTouchedPrevClose, active: ctx.firstHourTouchedPrevClose, weightFGD: 3, weightFRD: 10, category: "template-edge" },
+    { key: "newYorkSession", label: "New York session", value: ctx.sessionLabel, active: ctx.sessionLabel === "newYorkSession", weightFGD: 10, weightFRD: 10, category: "session-location" },
+    { key: "londonSession", label: "London session", value: ctx.sessionLabel, active: ctx.sessionLabel === "londonSession", weightFGD: 6, weightFRD: 6, category: "session-location" },
+    { key: "asiaSession", label: "Asia session", value: ctx.sessionLabel, active: ctx.sessionLabel === "asiaSession", weightFGD: 4, weightFRD: 4, category: "session-location" },
+    { key: "lowSideLocationActive", label: "Low-side source location active", value: ctx.sourceLocationLabel, active: ctx.direction === "long" && Boolean(ctx.sourceBar), weightFGD: 10, weightFRD: 0, category: "session-location" },
+    { key: "highSideLocationActive", label: "High-side source location active", value: ctx.sourceLocationLabel, active: ctx.direction === "short" && Boolean(ctx.sourceBar), weightFGD: 0, weightFRD: 10, category: "session-location" },
+    { key: "emaCloseInside20", label: "5m close back inside 20EMA", value: Boolean(ctx.emaConfirmBar), active: Boolean(ctx.emaConfirmBar), weightFGD: 20, weightFRD: 20, category: "entry-confirmation" },
+    { key: "peakFormationSeen", label: "Peak formation seen", value: Boolean(ctx.peakBar), active: Boolean(ctx.peakBar), weightFGD: 8, weightFRD: 8, category: "entry-confirmation" },
+    { key: "engulfmentSeen", label: "Engulfment seen", value: Boolean(ctx.engulfmentBar), active: Boolean(ctx.engulfmentBar), weightFGD: 6, weightFRD: 6, category: "entry-confirmation" },
+    { key: "pinHammerSeen", label: "Pin / hammer seen", value: Boolean(ctx.pinBar), active: Boolean(ctx.pinBar), weightFGD: 6, weightFRD: 6, category: "entry-confirmation" },
+    { key: "stopHuntSeen", label: "Stop hunt seen", value: Boolean(ctx.stopHuntBar), active: Boolean(ctx.stopHuntBar), weightFGD: 6, weightFRD: 6, category: "entry-confirmation" },
+    { key: "pattern123Seen", label: "123 pattern seen", value: ctx.pattern123Ready, active: ctx.pattern123Ready, weightFGD: 6, weightFRD: 6, category: "entry-confirmation" },
+    { key: "roundNumberConfluence", label: "Round number confluence", value: ctx.roundNumberConfluence, active: ctx.roundNumberConfluence, weightFGD: 4, weightFRD: 4, category: "entry-confirmation" },
+    { key: "strikeZoneConfluence", label: "Strike zone confluence", value: ctx.strikeZoneConfluence, active: ctx.strikeZoneConfluence, weightFGD: 6, weightFRD: 6, category: "entry-confirmation" },
+    { key: "noMajorRedNews", label: "No major red news", value: true, active: true, weightFGD: 5, weightFRD: 5, category: "quality-behavior" },
+    { key: "entryNearTimingWindowOpen", label: "Entry near timing window open", value: Boolean(ctx.entryBar), active: entryWindowOpen(ctx.entryBar), weightFGD: 5, weightFRD: 5, category: "quality-behavior" },
+    { key: "immediateFollowThrough", label: "Immediate follow-through", value: ctx.immediateFollowThrough, active: ctx.immediateFollowThrough, weightFGD: 5, weightFRD: 5, category: "quality-behavior" },
+  ];
 
-const blockedTargetLevels = (
-  template: ReplayDatasetAnalysis["template"],
-  reason: string,
-): TradeLevel[] =>
-  ([30, 35, 40, 50] as const).map((tier) => ({
-    tier,
-    price: 0,
-    eligible: false,
-    hit: false,
-    status: template === "INVALID" ? "blocked" : "pending",
-    reason,
-    missingGate: reason,
-  }));
+  return features.map((feature) => ({ ...feature, contribution: feature.active ? featureWeightForTemplate(feature, ctx.templateType) : 0 }));
+};
 
-const resolveReplayVisibility = (
-  analysis: ReplayDatasetAnalysis,
-  currentBarIndex: number,
-): ReplayVisibility => {
-  const visibleEvents = analysis.eventLog.filter(
-    (event) => event.visibleFromIndex <= currentBarIndex,
-  );
-  const visibleAnnotations = analysis.annotations.filter(
-    (annotation) => annotation.visibleFromIndex <= currentBarIndex,
-  );
+export const evaluateUnifiedSignalDayStrategy = (ctx: StrategyContext): UnifiedSignalDayStrategy => {
+  const hardGates: UnifiedHardGate[] = [
+    { key: "templateValid", label: "Template valid", passed: Boolean(ctx.templateType), reason: ctx.templateType ? `${ctx.templateType} template confirmed from D-2/D-1 structure.` : "Template is not valid FRD/FGD/FRD_INSIDE." },
+    { key: "day3Active", label: "Day 3 active", passed: ctx.tradeGroup.length > 0, reason: ctx.tradeGroup.length > 0 ? "Trade day bars are loaded." : "Trade day bars are unavailable." },
+    { key: "sessionTimingValid", label: "Session timing valid", passed: ctx.session.length > 0, reason: ctx.session.length > 0 ? "New York session is active and visible." : "New York session bars are unavailable." },
+    { key: "sourceLocationValid", label: "Source location valid", passed: Boolean(ctx.sourceBar), reason: ctx.sourceBar ? `${ctx.sourceLocationLabel} source is active.` : `Missing ${ctx.direction === "long" ? "LOD / LOS / low-side LHF" : "HOD / HOS / high-side LHF"} source.` },
+    { key: "emaEntryValid", label: "EMA entry valid", passed: Boolean(ctx.emaConfirmBar), reason: ctx.emaConfirmBar ? `5m ${ctx.direction === "long" ? "bullish" : "bearish"} close returned inside 20EMA.` : "5m EMA re-entry confirm has not happened yet." },
+    { key: "stopDistanceValid", label: "Stop distance valid", passed: (ctx.stopDistancePips ?? Infinity) <= 20, reason: ctx.stopDistancePips === undefined ? "Stop distance unavailable." : ctx.stopDistancePips <= 20 ? `Stop distance ${ctx.stopDistancePips} pips is within max 20.` : `Stop distance ${ctx.stopDistancePips} pips exceeds max 20.` },
+  ];
+
+  const weightedFeatures = buildWeightedFeatures(ctx);
+  const score = Math.min(100, weightedFeatures.reduce((sum, feature) => sum + feature.contribution, 0));
+  const scoreBand = scoreBandFor(score);
+  const hardGateFailures = hardGates.filter((gate) => !gate.passed).map((gate) => `${gate.label}: ${gate.reason}`);
+  const entryAllowed = hardGateFailures.length === 0 && score >= 75;
+  const whyEntryBlocked = [
+    ...hardGateFailures.map((reason) => `Hard gate failed — ${reason}`),
+    ...(hardGateFailures.length === 0 && score < 75 ? [`Score below threshold — ${score}/100 < 75.`] : []),
+  ];
+  const byCategory = Object.fromEntries(featureCategoryOrder.map((category) => [category, weightedFeatures.filter((feature) => feature.category === category).reduce((sum, feature) => sum + feature.contribution, 0)])) as Record<UnifiedFeatureCategory, number>;
+  const topPositiveFeatures = [...weightedFeatures].filter((feature) => feature.active && feature.contribution > 0).sort((a, b) => b.contribution - a.contribution).slice(0, 5);
+  const missingHighValueFeatures = [...weightedFeatures].filter((feature) => !feature.active && featureWeightForTemplate(feature, ctx.templateType) >= 8).sort((a, b) => featureWeightForTemplate(b, ctx.templateType) - featureWeightForTemplate(a, ctx.templateType)).slice(0, 5);
+
+  return {
+    templateType: ctx.templateType,
+    direction: ctx.direction,
+    hardGates,
+    weightedFeatures,
+    score,
+    scoreBand,
+    entryAllowed,
+    entryReason: entryAllowed ? `Entry allowed — all hard gates passed and score is ${score}/100 (${scoreBand}).` : whyEntryBlocked[0] ?? "Entry blocked.",
+    debugBreakdown: { byCategory, topPositiveFeatures, missingHighValueFeatures, whyEntryBlocked },
+  };
+};
+
+const templateBias = (template: TemplateType) => template === "FGD" ? "bullish" : template === "FRD" || template === "FRD_INSIDE" ? "bearish" : "neutral";
+const templateDirection = (templateType?: UnifiedTemplateType): TradeSide => templateType === "FGD" ? "long" : "short";
+const bandLabel = (band: UnifiedSignalDayStrategy["scoreBand"]) => band;
+
+const buildRuleTrace = (strategy: UnifiedSignalDayStrategy, ctx: StrategyContext, tradeDay: string): RuleTraceItem[] => [
+  ...strategy.hardGates.map((gate) => ({ ruleName: `Hard gate: ${gate.key}`, timeframe: gate.key === "emaEntryValid" ? "5m" : "session", passed: gate.passed, reason: gate.reason, prices: { score: strategy.score, stopDistancePips: ctx.stopDistancePips ?? -1, sourceToPrevClosePips: ctx.sourceToPrevClosePips ?? -1 }, times: { tradeDay } })),
+  ...strategy.weightedFeatures.map((feature) => ({ ruleName: `Feature: ${feature.key}`, timeframe: feature.key === "emaCloseInside20" ? "5m" : "session", passed: feature.active, reason: `${feature.label} ${feature.active ? "active" : "inactive"}; contribution ${feature.contribution}.`, prices: { contribution: feature.contribution, value: typeof feature.value === "number" ? feature.value : feature.active ? 1 : 0 }, times: { tradeDay } })),
+] as RuleTraceItem[];
+
+const resolveReplayVisibility = (analysis: ReplayDatasetAnalysis, currentBarIndex: number): ReplayVisibility => {
+  const visibleEvents = analysis.eventLog.filter((event) => event.visibleFromIndex <= currentBarIndex);
+  const visibleAnnotations = analysis.annotations.filter((annotation) => annotation.visibleFromIndex <= currentBarIndex);
   const latestVisibleEvent = visibleEvents.slice(-1)[0];
-  const latestVisibleEntryEvent = visibleEvents
-    .filter((event) => event.stage === "entry")
-    .slice(-1)[0];
-  const canEnter = latestVisibleEntryEvent?.title === "Entry valid";
-  const stageEngineBlocked = datasetBlocksStageEngine(analysis);
-  const stage =
-    analysis.invalidReasons.length > 0
-      ? "invalid"
-      : analysis.template === "INCOMPLETE"
-        ? "signal"
-        : (latestVisibleEvent?.stage ?? "background");
-  const statusBanner =
-    analysis.invalidReasons[0] ??
-    (analysis.template === "INCOMPLETE"
-      ? analysis.missingConditions[0] ?? "Day 3 template is incomplete."
-      : latestVisibleEvent?.statusBanner ?? "Replay ready");
-  const currentReasoning =
-    analysis.invalidReasons.length > 0
-      ? [
-          analysis.invalidReasons[0],
-          ...visibleEvents.slice(-2).map((event) => event.detail),
-        ]
-      : analysis.template === "INCOMPLETE"
-        ? [
-            analysis.missingConditions[0] ?? "Day 3 template is incomplete.",
-            ...visibleEvents.slice(-2).map((event) => event.detail),
-          ]
-        : visibleEvents.slice(-3).map((event) => event.detail);
-  const waitingForGate =
-    analysis.missingConditions[0] ??
-    analysis.invalidReasons[0] ??
-    "Waiting for next gate.";
-
-  if (!canEnter && !stageEngineBlocked) {
-    currentReasoning.push(
-      "Waiting for source → stop hunt → 123 → 20EMA → entry gate sequence.",
-    );
-  }
-
+  const canEnter = analysis.unifiedStrategy.entryAllowed && currentBarIndex >= analysis.replayStartIndex;
+  const stage = analysis.invalidReasons.length > 0 ? "invalid" : canEnter ? "entry" : latestVisibleEvent?.stage ?? "background";
+  const statusBanner = latestVisibleEvent?.statusBanner ?? analysis.unifiedStrategy.entryReason;
+  const currentReasoning = [analysis.unifiedStrategy.entryReason, ...analysis.unifiedStrategy.debugBreakdown.whyEntryBlocked].filter(Boolean);
   return {
     stage,
     canEnter,
@@ -206,20 +211,114 @@ const resolveReplayVisibility = (
     currentBarIndex,
     visibleEvents,
     visibleAnnotations,
-    lastReplyEval: {
-      stage,
-      canReply: canEnter,
-      explanation:
-        analysis.invalidReasons[0] ??
-        (analysis.template === "INCOMPLETE"
-          ? analysis.missingConditions[0] ??
-            "Template is incomplete, so the Day 3 entry workflow stays blocked."
-          : canEnter
-            ? "Current replay marker has unlocked the entry gate."
-            : (latestVisibleEvent?.detail ?? waitingForGate)),
-    },
+    lastReplyEval: { stage, canReply: canEnter, explanation: analysis.unifiedStrategy.entryReason },
   };
 };
+
+const sliceBarsThroughTradeDay = (bars1m: OhlcvBar[], selectedTradeDay: string) => bars1m.filter((bar) => strategyNyDate(strategyTime(bar)) <= selectedTradeDay);
+const sliceTimeframeBarMapThroughTradeDay = (timeframeBars: Partial<TimeframeBarMap> | undefined, selectedTradeDay: string): Partial<TimeframeBarMap> =>
+  Object.fromEntries(replayTimeframes.map((timeframe) => [timeframe, (timeframeBars?.[timeframe] ?? []).filter((bar) => strategyNyDate(strategyTime(bar)) <= selectedTradeDay)])) as Partial<TimeframeBarMap>;
+const buildReplayTimeframeBars = (scopedBars1m: OhlcvBar[], precomputedTimeframeBars?: Partial<TimeframeBarMap>): TimeframeBarMap => {
+  const runtimeFallback = buildTimeframeBarMap(scopedBars1m);
+  return Object.fromEntries(replayTimeframes.map((timeframe) => {
+    const precomputed = precomputedTimeframeBars?.[timeframe];
+    return [timeframe, Array.isArray(precomputed) && precomputed.length > 0 ? precomputed : runtimeFallback[timeframe]];
+  })) as TimeframeBarMap;
+};
+
+const findSourceBar = (templateType: UnifiedTemplateType | undefined, session: OhlcvBar[]) => {
+  if (!templateType || !session.length) return undefined;
+  if (templateType === "FGD") return session.reduce((best, bar) => (!best || bar.low < best.low ? bar : best), session[0]);
+  return session.reduce((best, bar) => (!best || bar.high > best.high ? bar : best), session[0]);
+};
+
+const findPeakFormationBar = (templateType: UnifiedTemplateType | undefined, sourceBar: OhlcvBar | undefined, session: OhlcvBar[]) => {
+  if (!templateType || !sourceBar) return undefined;
+  const sourceIndex = session.findIndex((bar) => strategyTime(bar) === strategyTime(sourceBar));
+  const lookahead = session.slice(sourceIndex, Math.min(sourceIndex + 6, session.length));
+  if (!lookahead.length) return undefined;
+  return templateType === "FGD"
+    ? lookahead.reduce((best, bar) => (bar.low <= (best?.low ?? Infinity) ? bar : best), lookahead[0])
+    : lookahead.reduce((best, bar) => (bar.high >= (best?.high ?? -Infinity) ? bar : best), lookahead[0]);
+};
+
+const findStopHuntBar = (templateType: UnifiedTemplateType | undefined, sourceBar: OhlcvBar | undefined, session: OhlcvBar[]) => {
+  if (!templateType || !sourceBar) return undefined;
+  const sourceIndex = session.findIndex((bar) => strategyTime(bar) === strategyTime(sourceBar));
+  const reclaimWindow = session.slice(sourceIndex + 1, sourceIndex + 4);
+  return reclaimWindow.find((bar) => templateType === "FGD" ? bar.close > sourceBar.low : bar.close < sourceBar.high);
+};
+
+const findPattern123 = (templateType: UnifiedTemplateType | undefined, sourceBar: OhlcvBar | undefined, session: OhlcvBar[]) => {
+  if (!templateType || !sourceBar) return false;
+  const sourceIndex = session.findIndex((bar) => strategyTime(bar) === strategyTime(sourceBar));
+  if (sourceIndex < 0 || session.length < sourceIndex + 4) return false;
+  const a = session[sourceIndex + 1];
+  const b = session[sourceIndex + 2];
+  const c = session[sourceIndex + 3];
+  if (!a || !b || !c) return false;
+  return templateType === "FGD" ? a.high < b.high && c.low > sourceBar.low : a.low > b.low && c.high < sourceBar.high;
+};
+
+const findEngulfmentBar = (templateType: UnifiedTemplateType | undefined, session: OhlcvBar[]) => {
+  if (!templateType) return undefined;
+  for (let i = 1; i < session.length; i += 1) {
+    const prev = session[i - 1];
+    const curr = session[i];
+    if (templateType === "FGD" && prev.close < prev.open && curr.close > curr.open && curr.close >= prev.open && curr.open <= prev.close) return curr;
+    if (templateType !== "FGD" && prev.close > prev.open && curr.close < curr.open && curr.close <= prev.open && curr.open >= prev.close) return curr;
+  }
+  return undefined;
+};
+
+const findPinBar = (templateType: UnifiedTemplateType | undefined, session: OhlcvBar[]) =>
+  session.find((bar) => {
+    const body = Math.abs(bar.close - bar.open);
+    const range = Math.max(bar.high - bar.low, 0.00001);
+    const upperWick = bar.high - Math.max(bar.open, bar.close);
+    const lowerWick = Math.min(bar.open, bar.close) - bar.low;
+    return templateType === "FGD" ? lowerWick >= body * 2 && body / range <= 0.35 : upperWick >= body * 2 && body / range <= 0.35;
+  });
+
+const findEmaConfirmBar = (templateType: UnifiedTemplateType | undefined, five: OhlcvBar[], ema5: number[]) => {
+  if (!templateType) return undefined;
+  for (let i = 1; i < five.length; i += 1) {
+    if (templateType === "FGD" && five[i].close > ema5[i]) return five[i];
+    if (templateType !== "FGD" && five[i].close < ema5[i]) return five[i];
+  }
+  return undefined;
+};
+
+const findSessionLabel = () => "newYorkSession" as const;
+const isRoundNumber = (price?: number) => price !== undefined && Math.abs((price * 10000) % 50) <= 5;
+const resolveTemplateType = (d2?: OhlcvBar, d1?: OhlcvBar): UnifiedTemplateType | undefined => {
+  const dump = Boolean(d2 && d2.close < d2.open);
+  const pump = Boolean(d2 && d2.close > d2.open);
+  const bullishD1 = Boolean(d1 && d1.close > d1.open);
+  const bearishD1 = Boolean(d1 && d1.close < d1.open);
+  const inside = Boolean(d1 && d2 && d1.high <= d2.high && d1.low >= d2.low);
+  if (dump && bullishD1) return "FGD";
+  if (pump && bearishD1 && inside) return "FRD_INSIDE";
+  if (pump && bearishD1) return "FRD";
+  return undefined;
+};
+const resolveTemplate = (templateType?: UnifiedTemplateType, invalidReasons: string[] = []): TemplateType => invalidReasons.length ? "INVALID" : templateType ?? "INCOMPLETE";
+
+const buildBacktestSnapshot = (analysis: Omit<ReplayDatasetAnalysis, "backtestSnapshot">): BacktestSignalSnapshot => ({
+  templateType: analysis.unifiedStrategy.templateType,
+  direction: analysis.unifiedStrategy.direction,
+  score: analysis.unifiedStrategy.score,
+  scoreBand: analysis.unifiedStrategy.scoreBand,
+  hardGates: analysis.unifiedStrategy.hardGates,
+  activeFeatures: analysis.unifiedStrategy.weightedFeatures.filter((feature) => feature.active).map((feature) => feature.key),
+  sourceToPrevClosePips: analysis.ruleTrace.find((trace) => trace.ruleName === "Metric: sourceToPrevClosePips")?.prices.value,
+  d1BodyPips: analysis.ruleTrace.find((trace) => trace.ruleName === "Metric: d1BodyPips")?.prices.value,
+  d1BodyPctRange: analysis.ruleTrace.find((trace) => trace.ruleName === "Metric: d1BodyPctRange")?.prices.value,
+  hit30: analysis.targetLevels.find((level) => level.tier === 30)?.hit ?? false,
+  hit35: analysis.targetLevels.find((level) => level.tier === 35)?.hit ?? false,
+  hit40: analysis.targetLevels.find((level) => level.tier === 40)?.hit ?? false,
+  hit50: analysis.targetLevels.find((level) => level.tier === 50)?.hit ?? false,
+});
 
 export const buildReplayDatasetAnalysis = (
   datasetId: string,
@@ -231,14 +330,11 @@ export const buildReplayDatasetAnalysis = (
   const groupedByDay = byNyDate(bars1m);
   const days = Object.keys(groupedByDay).sort();
   const tradeDay = selectedTradeDay ?? days[days.length - 1] ?? "";
-  const scopedBars = selectedTradeDay
-    ? sliceBarsThroughTradeDay(bars1m, tradeDay)
-    : bars1m;
-  const scopedPrecomputedTimeframeBars = selectedTradeDay
-    ? sliceTimeframeBarMapThroughTradeDay(precomputedTimeframeBars, tradeDay)
-    : precomputedTimeframeBars;
+  const scopedBars = selectedTradeDay ? sliceBarsThroughTradeDay(bars1m, tradeDay) : bars1m;
+  const scopedPrecomputedTimeframeBars = selectedTradeDay ? sliceTimeframeBarMapThroughTradeDay(precomputedTimeframeBars, tradeDay) : precomputedTimeframeBars;
   const timeframeBars = buildReplayTimeframeBars(scopedBars, scopedPrecomputedTimeframeBars);
   const invalidIssues = validateDataset(scopedBars);
+  const invalidReasons = invalidIssues.map((issue) => issue.message);
   const scopedGroupedByDay = byNyDate(scopedBars);
   const daily = timeframeBars["1D"];
   const d2 = daily[daily.length - 3];
@@ -248,1052 +344,67 @@ export const buildReplayDatasetAnalysis = (
   const five = aggregateBars(session, "5m");
   const ema5 = ema(five, 20);
   const previousClose = d1?.close;
-  const hos = Math.max(
-    ...session.map((bar) => bar.high),
-    Number.NEGATIVE_INFINITY,
-  );
-  const los = Math.min(
-    ...session.map((bar) => bar.low),
-    Number.POSITIVE_INFINITY,
-  );
-  const hod = Math.max(
-    ...tradeGroup.map((bar) => bar.high),
-    Number.NEGATIVE_INFINITY,
-  );
-  const lod = Math.min(
-    ...tradeGroup.map((bar) => bar.low),
-    Number.POSITIVE_INFINITY,
-  );
-  const dump = Boolean(d2 && d2.close < d2.open);
-  const pump = Boolean(d2 && d2.close > d2.open);
-  const fgd = dump && Boolean(d1 && d1.close > d1.open);
-  const frd = pump && Boolean(d1 && d1.close < d1.open);
-  const template = invalidIssues.length
-    ? "INVALID"
-    : fgd
-      ? "FGD"
-      : frd
-        ? "FRD"
-        : "INCOMPLETE";
-  const bias =
-    template === "FGD" ? "bullish" : template === "FRD" ? "bearish" : "neutral";
-  const invalidReasons = invalidIssues.map((issue) => issue.message);
-  const stageEngineAllowed =
-    invalidReasons.length === 0 && template !== "INCOMPLETE";
-  const stageEngineBlockReason = invalidReasons.length
-    ? "Dataset invalid — target tiers remain blocked until validation issues are fixed."
-    : "Template incomplete — target tiers stay pending until a full Day 3 setup is confirmed.";
-  const ruleTrace: RuleTraceItem[] = [];
-  const eventLog: EventLogItem[] = [];
-  const annotations: Annotation[] = [];
-  const missingConditions: string[] = [];
-
-  if (d2 && !invalidReasons.length) {
-    const trace = [
-      {
-        ruleName: "Background day",
-        timeframe: "1D",
-        passed: dump || pump,
-        reason: dump
-          ? "Dump Day detected from bearish D-2 close."
-          : pump
-            ? "Pump Day detected from bullish D-2 close."
-            : "D-2 is neutral.",
-        prices: { open: d2.open, close: d2.close, range: d2.high - d2.low },
-        times: {
-          day: strategyNyDate(strategyTime(d2)),
-          sourceStart: d2.sourceStartTime ?? d2.sourceTime ?? d2.time,
-          sourceEnd: d2.sourceEndTime ?? d2.sourceTime ?? d2.time,
-        },
-      } satisfies RuleTraceItem,
-    ];
-    pushTraceEvent(
-      eventLog,
-      ruleTrace,
-      makeEvent(
-        "background",
-        dump
-          ? "Dump Day detected"
-          : pump
-            ? "Pump Day detected"
-            : "Background invalid",
-        `${strategyNyDate(strategyTime(d2))} background classified from daily structure.`,
-        dump
-          ? "Range/body/close structure shows dump-day momentum."
-          : pump
-            ? "Range/body/close structure shows pump-day momentum."
-            : "D-2 did not establish pump or dump background.",
-        0,
-        trace,
-        strategyTime(d2),
-      ),
-    );
-  }
-  if (d1 && !invalidReasons.length) {
-    const inside = Boolean(d2) && d1.high <= d2.high && d1.low >= d2.low;
-    const body = pips(Math.abs(d1.close - d1.open));
-    const range = pips(d1.high - d1.low);
-    const trace: RuleTraceItem[] = [
-      {
-        ruleName: "Signal day",
-        timeframe: "1D",
-        passed: fgd || frd,
-        reason: fgd
-          ? "FGD detected from dump background and bullish D-1 close."
-          : frd
-            ? "FRD detected from pump background and bearish D-1 close."
-            : "D-1 does not complete FRD/FGD signal rules.",
-        prices: { bodyPips: body, rangePips: range },
-        times: {
-          day: strategyNyDate(strategyTime(d1)),
-          sourceStart: d1.sourceStartTime ?? d1.sourceTime ?? d1.time,
-          sourceEnd: d1.sourceEndTime ?? d1.sourceTime ?? d1.time,
-        },
-      },
-      {
-        ruleName: "Signal quality",
-        timeframe: "1D",
-        passed:
-          template === "FGD"
-            ? body >= 40 && body / Math.max(range, 1) >= 0.6
-            : inside,
-        reason:
-          template === "FGD"
-            ? "FGD priority checks body >= 40 pips and >= 60% of range."
-            : "FRD priority checks inside day vs D-2.",
-        prices: {
-          bodyPips: body,
-          rangePips: range,
-          d2High: d2?.high ?? 0,
-          d2Low: d2?.low ?? 0,
-        },
-        times: {
-          day: strategyNyDate(strategyTime(d1)),
-          sourceStart: d1.sourceStartTime ?? d1.sourceTime ?? d1.time,
-          sourceEnd: d1.sourceEndTime ?? d1.sourceTime ?? d1.time,
-        },
-      },
-    ];
-    pushTraceEvent(
-      eventLog,
-      ruleTrace,
-      makeEvent(
-        "signal",
-        fgd ? "FGD detected" : frd ? "FRD detected" : "Signal day incomplete",
-        `${strategyNyDate(strategyTime(d1))} signal day assessed.`,
-        fgd
-          ? "FGD detected — dump background + bullish signal body. Next: watch New York LOS source and low sweep reversal."
-          : frd
-            ? "FRD detected — inside day + bearish close. Next: watch New York HOS source and reclaim failure."
-            : "Signal day is present but template is incomplete.",
-        1,
-        trace,
-        strategyTime(d1),
-      ),
-    );
-  }
-
-  const startIndex = scopedBars.findIndex(
-    (bar) => strategyNyDate(strategyTime(bar)) === tradeDay && inNySession(bar),
-  );
+  const templateType = resolveTemplateType(d2, d1);
+  const template = resolveTemplate(templateType, invalidReasons);
+  const direction = templateType === "FGD" ? "long" : "short";
+  const sourceBar = findSourceBar(templateType, session);
+  const sourcePrice = sourceBar ? templateType === "FGD" ? sourceBar.low : sourceBar.high : undefined;
+  const peakBar = findPeakFormationBar(templateType, sourceBar, session);
+  const stopHuntBar = findStopHuntBar(templateType, sourceBar, session);
+  const engulfmentBar = findEngulfmentBar(templateType, session);
+  const pinBar = findPinBar(templateType, session);
+  const pattern123Ready = findPattern123(templateType, sourceBar, session);
+  const emaConfirmBar = findEmaConfirmBar(templateType, five, ema5);
+  const stopPrice = peakBar ? templateType === "FGD" ? peakBar.low : peakBar.high : sourcePrice;
+  const entryBar = emaConfirmBar;
+  const entryPrice = entryBar?.close;
+  const stopDistancePips = entryPrice !== undefined && stopPrice !== undefined ? pips(Math.abs(entryPrice - stopPrice)) : undefined;
+  const sourceToPrevClosePips = sourcePrice !== undefined && previousClose !== undefined ? pips(Math.abs(sourcePrice - previousClose)) : undefined;
+  const d1BodyPips = d1 ? pips(Math.abs(d1.close - d1.open)) : undefined;
+  const d1BodyPctRange = d1 ? Math.round((Math.abs(d1.close - d1.open) / Math.max(d1.high - d1.low, 0.00001)) * 100) : undefined;
+  const insideDay = Boolean(d1 && d2 && d1.high <= d2.high && d1.low >= d2.low);
+  const firstHour = session.slice(0, 60);
+  const firstHourTouchedPrevClose = previousClose !== undefined && firstHour.some((bar) => bar.low <= previousClose && bar.high >= previousClose);
+  const roundNumberConfluence = isRoundNumber(sourcePrice) || isRoundNumber(entryPrice);
+  const strikeZoneConfluence = Boolean(sourceBar && ((templateType === "FGD" && (sourceBar.low <= Math.min(...tradeGroup.map((bar) => bar.low), sourceBar.low + 1))) || (templateType !== "FGD" && sourceBar.high >= Math.max(...tradeGroup.map((bar) => bar.high), sourceBar.high - 1))));
+  const immediateFollowThrough = Boolean(entryBar && entryPrice !== undefined && tradeGroup.slice(tradeGroup.findIndex((bar) => strategyTime(bar) === strategyTime(entryBar)) + 1, tradeGroup.findIndex((bar) => strategyTime(bar) === strategyTime(entryBar)) + 4).some((bar) => templateType === "FGD" ? bar.high >= entryPrice + 0.0005 : bar.low <= entryPrice - 0.0005));
+  const sourceLocationLabel = templateType === "FGD" ? "LOD / LOS / low-side LHF zone" : "HOD / HOS / high-side LHF zone";
+  const ctx: StrategyContext = { templateType, template, direction: templateDirection(templateType), d1, d2, tradeGroup, session, five, ema5, sourceBar, sourcePrice, sourceLocationLabel, stopHuntBar, peakBar, engulfmentBar, pinBar, pattern123Ready, emaConfirmBar, entryBar, entryPrice, stopPrice, stopDistancePips, previousClose, sourceToPrevClosePips, sessionLabel: findSessionLabel(), d1BodyPips, d1BodyPctRange, insideDay, firstHourTouchedPrevClose, roundNumberConfluence, strikeZoneConfluence, immediateFollowThrough };
+  const unifiedStrategy = evaluateUnifiedSignalDayStrategy(ctx);
+  const startIndex = scopedBars.findIndex((bar) => strategyNyDate(strategyTime(bar)) === tradeDay && inNySession(bar));
   const replayStartIndex = Math.max(0, startIndex);
   const replayEndIndex = scopedBars.length - 1;
-  if (!session.length)
-    missingConditions.push("Trade day New York session unavailable.");
+  const annotations: Annotation[] = [];
+  const missingConditions = unifiedStrategy.debugBreakdown.whyEntryBlocked.length ? [...unifiedStrategy.debugBreakdown.whyEntryBlocked] : [];
+  const bias = templateBias(template);
+  const quality = invalidReasons.length ? "invalid" : unifiedStrategy.score >= 75 ? "strong" : unifiedStrategy.score >= 60 ? "acceptable" : "weak";
+  const eventLog: EventLogItem[] = [
+    makeEvent("background", templateType === "FGD" ? "Dump Day → FGD" : templateType ? `${templateType} template` : "Template incomplete", "Unified signal-day scoring initialized.", summarizeCandidate(template, invalidReasons, missingConditions), 0, [], strategyTime(d2 ?? scopedBars[0] ?? { time: "" })),
+    makeEvent("trade-day", `Score ${unifiedStrategy.score}/100`, `Band ${bandLabel(unifiedStrategy.scoreBand)}.`, unifiedStrategy.entryReason, replayStartIndex, [], strategyTime(session[0] ?? scopedBars[replayStartIndex] ?? { time: "" }), { score: unifiedStrategy.score }),
+    makeEvent("entry", unifiedStrategy.entryAllowed ? "Entry valid" : "Entry blocked", "Unified score gate evaluated.", unifiedStrategy.entryReason, replayStartIndex, [], strategyTime(entryBar ?? session[0] ?? scopedBars[replayStartIndex] ?? { time: "" }), { score: unifiedStrategy.score, entry: entryPrice ?? 0, stop: stopPrice ?? 0 }),
+  ];
+  const ruleTrace: RuleTraceItem[] = [
+    ...buildRuleTrace(unifiedStrategy, ctx, tradeDay),
+    { ruleName: "Metric: sourceToPrevClosePips", timeframe: "session", passed: sourceToPrevClosePips !== undefined, reason: "Source to previous close distance.", prices: { value: sourceToPrevClosePips ?? -1 }, times: { tradeDay } },
+    { ruleName: "Metric: d1BodyPips", timeframe: "1D", passed: d1BodyPips !== undefined, reason: "D-1 body size in pips.", prices: { value: d1BodyPips ?? -1 }, times: { tradeDay } },
+    { ruleName: "Metric: d1BodyPctRange", timeframe: "1D", passed: d1BodyPctRange !== undefined, reason: "D-1 body as % of range.", prices: { value: d1BodyPctRange ?? -1 }, times: { tradeDay } },
+  ];
 
-  const quality = invalidIssues.length
-    ? "invalid"
-    : template === "FGD" && d1 && pips(Math.abs(d1.close - d1.open)) >= 40
-      ? "strong"
-      : template === "FRD" && d1 && d2 && d1.high <= d2.high && d1.low >= d2.low
-        ? "strong"
-        : template === "INCOMPLETE"
-          ? "weak"
-          : "acceptable";
-
-  if (!stageEngineAllowed) {
-    if (invalidReasons.length) {
-      eventLog.push(
-        makeEvent(
-          "invalid",
-          invalidReasons[0],
-          "Dataset validation failed.",
-          invalidIssues.map((issue) => issue.detail).join(" "),
-          0,
-          [],
-          strategyTime(scopedBars[0] ?? { time: "" }),
-        ),
-      );
-      const validationTrace = invalidIssues.map(
-        (issue): RuleTraceItem => ({
-          ruleName: `Validation: ${issue.code}`,
-          timeframe: "1D",
-          passed: false,
-          reason: issue.detail,
-          prices: {},
-          times: {
-            tradeDay,
-          },
-        }),
-      );
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "invalid",
-          "Validation diagnostics",
-          "Dataset validation diagnostics collected.",
-          invalidIssues.map((issue) => issue.detail).join(" "),
-          0,
-          validationTrace,
-          strategyTime(scopedBars[0] ?? { time: "" }),
-        ),
-      );
-      eventLog.push(
-        makeEvent(
-          "trade-day",
-          "Candidate summary",
-          summarizeCandidate(template, invalidReasons, missingConditions),
-          "Dataset invalid, so replay stops at candidate/validation review and does not enter the stage engine.",
-          replayStartIndex,
-          [],
-          session[0] ? strategyTime(session[0]) : undefined,
-        ),
-      );
-    } else {
-      missingConditions.unshift(
-        "Template incomplete — do not advance into the full Day 3 entry workflow.",
-      );
-      eventLog.push(
-        makeEvent(
-          "trade-day",
-          "Candidate summary",
-          summarizeCandidate(template, invalidReasons, missingConditions),
-          "Background and signal context are available, but the template is incomplete so source/stop hunt/123/EMA/entry management remain disabled.",
-          replayStartIndex,
-          [],
-          session[0] ? strategyTime(session[0]) : undefined,
-        ),
-      );
-    }
-
-    return {
-      datasetId,
-      symbol,
-      timeframeBars,
-      template,
-      bias,
-      quality,
-      selectedTradeDay: tradeDay,
-      invalidReasons,
-      missingConditions,
-      nextExpectation: invalidReasons.length
-        ? "Next: fix dataset validation issues or load a different instrument file."
-        : "Next: wait for a complete FGD/FRD template before enabling the Day 3 workflow.",
-      eventLog,
-      ruleTrace,
-      annotations,
-      replayStartIndex,
-      replayEndIndex,
-      stopPrice: undefined,
-      entryPrice: undefined,
-      sourcePrice: undefined,
-      previousClose,
-      hos: Number.isFinite(hos) ? hos : undefined,
-      los: Number.isFinite(los) ? los : undefined,
-      hod: Number.isFinite(hod) ? hod : undefined,
-      lod: Number.isFinite(lod) ? lod : undefined,
-      targetLevels: blockedTargetLevels(template, stageEngineBlockReason),
-      recommendedTarget: undefined,
-    };
-  }
-
-  if (stageEngineAllowed) {
-    eventLog.push(
-      makeEvent(
-        "trade-day",
-        `Day 3 active — ${bias} bias from ${template === "INVALID" ? "invalid dataset" : template}`,
-        "Entered Day 3 New York trading window.",
-        template === "FGD"
-          ? "Day 3 active — bullish bias from FGD"
-          : template === "FRD"
-            ? "Day 3 active — bearish bias from FRD"
-            : "Day 3 active but template is not tradeable.",
-        replayStartIndex,
-        [],
-        session[0] ? strategyTime(session[0]) : undefined,
-      ),
-    );
-  }
-
-  let sourceIndex = -1;
-  let sourcePrice: number | undefined;
-  let stopHuntIndex = -1;
-  let p1 = -1;
-  let p2 = -1;
-  let p3 = -1;
-  let breakout = -1;
-  let emaIndex = -1;
-  let entryIndex = -1;
-  let stopPrice: number | undefined;
-  let entryPrice: number | undefined;
-
-  if (session.length) {
-    for (let i = 1; i < session.length; i += 1) {
-      const bar = session[i];
-      if (
-        template === "FGD" &&
-        sourceIndex === -1 &&
-        bar.low <= Math.min(...session.slice(0, i).map((x) => x.low))
-      ) {
-        sourceIndex = i;
-        sourcePrice = bar.low;
-      }
-      if (
-        template === "FRD" &&
-        sourceIndex === -1 &&
-        bar.high >= Math.max(...session.slice(0, i).map((x) => x.high))
-      ) {
-        sourceIndex = i;
-        sourcePrice = bar.high;
-      }
-      if (sourceIndex !== -1 && stopHuntIndex === -1) {
-        const sourceBar = session[sourceIndex];
-        if (
-          template === "FGD" &&
-          bar.close > sourceBar.low &&
-          i <= sourceIndex + 3
-        )
-          stopHuntIndex = i;
-        if (
-          template === "FRD" &&
-          bar.close < sourceBar.high &&
-          i <= sourceIndex + 3
-        )
-          stopHuntIndex = i;
-      }
-    }
-    if (sourceIndex !== -1) {
-      const global = replayStartIndex + sourceIndex;
-      const nearPrev =
-        previousClose !== undefined
-          ? pips(Math.abs((sourcePrice ?? 0) - previousClose))
-          : undefined;
-      const sourceBar = session[sourceIndex];
-      const trace = [
-        {
-          ruleName: "Source",
-          timeframe: "1m",
-          passed: true,
-          reason:
-            template === "FGD"
-              ? "FGD source uses LOS sweep."
-              : "FRD source uses HOS sweep.",
-          prices: {
-            source: sourcePrice ?? 0,
-            previousClose: previousClose ?? 0,
-            distanceToPreviousClosePips: nearPrev ?? -1,
-          },
-          times: {
-            strategyBar: strategyTime(sourceBar),
-            sourceBar: sourceBar.sourceTime ?? sourceBar.time,
-          },
-        } satisfies RuleTraceItem,
-      ];
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "source",
-          template === "FGD" ? "LOS source detected" : "HOS source detected",
-          "Source level appeared during Day 3 session.",
-          `${template === "FGD" ? "LOS" : "HOS"} source formed ${nearPrev !== undefined ? `with previous-close distance ${nearPrev} pips.` : "without previous close reference."}`,
-          global,
-          trace,
-          strategyTime(sourceBar),
-          { source: sourcePrice ?? 0 },
-        ),
-      );
-      annotations.push(
-        makeAnnotation(
-          "source",
-          global,
-          strategyTime(sourceBar),
-          sourcePrice ?? 0,
-          "Source",
-          "Source level used for Day 3 setup.",
-          trace,
-        ),
-      );
-      stopPrice =
-        template === "FGD"
-          ? (sourcePrice ?? 0) - 0.0021
-          : (sourcePrice ?? 0) + 0.0021;
-      annotations.push(
-        makeAnnotation(
-          "stop",
-          global,
-          strategyTime(sourceBar),
-          stopPrice,
-          "Stop",
-          "Stop sits outside source extreme; >20 pips means skip.",
-          trace,
-        ),
-      );
-    } else {
-      const lastBar = session[session.length - 1];
-      const attemptedBar = session
-        .slice(1)
-        .reduce<OhlcvBar | undefined>((best, bar) => {
-          if (!best) return bar;
-          if (template === "FGD") return bar.low < best.low ? bar : best;
-          if (template === "FRD") return bar.high > best.high ? bar : best;
-          return best;
-        }, undefined);
-      const trace = [
-        {
-          ruleName: "Source",
-          timeframe: "1m",
-          passed: false,
-          reason:
-            template === "FGD"
-              ? "No LOS sweep found yet during the active New York session."
-              : template === "FRD"
-                ? "No HOS sweep found yet during the active New York session."
-                : "Source rule not evaluated because the Day 3 template is incomplete.",
-          prices: {
-            attemptedSource:
-              template === "FGD"
-                ? (attemptedBar?.low ?? 0)
-                : (attemptedBar?.high ?? 0),
-            previousClose: previousClose ?? 0,
-            sessionLow: Number.isFinite(los) ? los : 0,
-            sessionHigh: Number.isFinite(hos) ? hos : 0,
-          },
-          times: {
-            attemptedBar: attemptedBar ? strategyTime(attemptedBar) : "",
-            sourceAttempt: attemptedBar?.sourceTime ?? attemptedBar?.time ?? "",
-            lastSessionBar: strategyTime(lastBar),
-          },
-        } satisfies RuleTraceItem,
-      ];
-      missingConditions.push("Source not found yet.");
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "source",
-          "Source not found",
-          "Source gate is still pending.",
-          template === "FGD"
-            ? "Need a LOS sweep before the setup can progress into stop-hunt validation."
-            : template === "FRD"
-              ? "Need a HOS sweep before the setup can progress into stop-hunt validation."
-              : "Source gate is blocked until the Day 3 template becomes tradeable.",
-          replayStartIndex + Math.max(session.length - 1, 0),
-          trace,
-          strategyTime(lastBar),
-          { attemptedSource: trace[0].prices.attemptedSource },
-        ),
-      );
-    }
-    if (stopHuntIndex !== -1) {
-      const global = replayStartIndex + stopHuntIndex;
-      const stopHuntBar = session[stopHuntIndex];
-      const sourceBar = session[sourceIndex];
-      const trace = [
-        {
-          ruleName: "Stop hunt",
-          timeframe: "1m",
-          passed: true,
-          reason:
-            template === "FGD"
-              ? "Price swept the prior low and reclaimed above it quickly."
-              : "Price swept the prior high and reclaimed below it quickly.",
-          prices: { source: sourcePrice ?? 0, reclaim: stopHuntBar.close },
-          times: {
-            strategySweep: strategyTime(sourceBar),
-            sourceSweep: sourceBar.sourceTime ?? sourceBar.time,
-            strategyReclaim: strategyTime(stopHuntBar),
-            sourceReclaim: stopHuntBar.sourceTime ?? stopHuntBar.time,
-          },
-        } satisfies RuleTraceItem,
-      ];
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "stop-hunt",
-          "Stop hunt confirmed",
-          "Stop hunt rule passed.",
-          template === "FGD"
-            ? "Stop hunt confirmed — low sweep reclaimed above the swept level."
-            : "Stop hunt confirmed — high sweep reclaimed back below the swept level.",
-          global,
-          trace,
-          strategyTime(stopHuntBar),
-        ),
-      );
-      annotations.push(
-        makeAnnotation(
-          "stopHunt",
-          global,
-          strategyTime(stopHuntBar),
-          stopHuntBar.close,
-          "Stop hunt",
-          "Quick reclaim after source sweep.",
-          trace,
-        ),
-      );
-      p1 = sourceIndex;
-      p2 = Math.min(session.length - 1, stopHuntIndex + 4);
-      p3 = Math.min(session.length - 1, p2 + 4);
-      breakout = Math.min(session.length - 1, p3 + 3);
-    } else {
-      const anchorIndex = Math.max(sourceIndex, 1);
-      const anchorBar = session[anchorIndex];
-      const sourceBar = sourceIndex !== -1 ? session[sourceIndex] : undefined;
-      const reclaimWindowEnd = sourceBar
-        ? session[Math.min(session.length - 1, sourceIndex + 3)]
-        : anchorBar;
-      const trace = [
-        {
-          ruleName: "Stop hunt",
-          timeframe: "1m",
-          passed: false,
-          reason: sourceBar
-            ? template === "FGD"
-              ? "Sweep happened, but no reclaim above the source low arrived within three bars."
-              : "Sweep happened, but no reclaim below the source high arrived within three bars."
-            : "Stop hunt cannot be confirmed before a source sweep exists.",
-          prices: {
-            source: sourcePrice ?? 0,
-            latestClose: anchorBar?.close ?? 0,
-            reclaimThreshold: sourcePrice ?? 0,
-          },
-          times: {
-            strategySweep: sourceBar ? strategyTime(sourceBar) : "",
-            sourceSweep: sourceBar?.sourceTime ?? sourceBar?.time ?? "",
-            reclaimWindowEnd: reclaimWindowEnd
-              ? strategyTime(reclaimWindowEnd)
-              : "",
-            latestObservedBar: anchorBar ? strategyTime(anchorBar) : "",
-          },
-        } satisfies RuleTraceItem,
-      ];
-      missingConditions.push("Stop hunt not confirmed yet.");
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "stop-hunt",
-          "Stop hunt not confirmed",
-          "Stop hunt rule failed so far.",
-          "Need a sweep and quick reclaim before upgrading setup quality.",
-          replayStartIndex + anchorIndex,
-          trace,
-          anchorBar ? strategyTime(anchorBar) : undefined,
-        ),
-      );
-    }
-    if (p1 !== -1) {
-      const trace = [
-        {
-          ruleName: "123 structure",
-          timeframe: "1m",
-          passed: true,
-          reason: "1-2-3 reversal mapped after stop hunt.",
-          prices: {
-            node1: session[p1].close,
-            node2: session[p2].close,
-            node3: session[p3].close,
-            breakout: session[breakout].close,
-          },
-          times: {
-            node1: strategyTime(session[p1]),
-            node2: strategyTime(session[p2]),
-            node3: strategyTime(session[p3]),
-            breakout: strategyTime(session[breakout]),
-            sourceNode1: session[p1].sourceTime ?? session[p1].time,
-            sourceNode2: session[p2].sourceTime ?? session[p2].time,
-            sourceNode3: session[p3].sourceTime ?? session[p3].time,
-            sourceBreakout:
-              session[breakout].sourceTime ?? session[breakout].time,
-          },
-        } satisfies RuleTraceItem,
-      ];
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "pattern-123",
-          "123 structure ready",
-          "Valid 1-2-3 structure is available.",
-          "123 is complete and the breakout leg is visible.",
-          replayStartIndex + breakout,
-          trace,
-          strategyTime(session[breakout]),
-        ),
-      );
-      annotations.push(
-        makeAnnotation(
-          "point1",
-          replayStartIndex + p1,
-          strategyTime(session[p1]),
-          session[p1].close,
-          "1",
-          "123 node 1",
-          trace,
-        ),
-      );
-      annotations.push(
-        makeAnnotation(
-          "point2",
-          replayStartIndex + p2,
-          strategyTime(session[p2]),
-          session[p2].close,
-          "2",
-          "123 node 2",
-          trace,
-        ),
-      );
-      annotations.push(
-        makeAnnotation(
-          "point3",
-          replayStartIndex + p3,
-          strategyTime(session[p3]),
-          session[p3].close,
-          "3",
-          "123 node 3",
-          trace,
-        ),
-      );
-    } else {
-      const anchorBar =
-        stopHuntIndex !== -1
-          ? session[stopHuntIndex]
-          : (session[Math.max(sourceIndex, 1)] ?? session[0]);
-      const trace = [
-        {
-          ruleName: "123 structure",
-          timeframe: "1m",
-          passed: false,
-          reason:
-            stopHuntIndex !== -1
-              ? "Stop hunt exists, but the 1-2-3 sequence has not extended far enough to confirm breakout structure."
-              : "123 structure waits on a confirmed stop hunt before nodes can be assigned.",
-          prices: {
-            source: sourcePrice ?? 0,
-            pivotClose: anchorBar?.close ?? 0,
-            projectedNode2:
-              stopHuntIndex !== -1
-                ? (session[Math.min(session.length - 1, stopHuntIndex + 4)]
-                    ?.close ?? 0)
-                : 0,
-          },
-          times: {
-            anchorBar: anchorBar ? strategyTime(anchorBar) : "",
-            sourceAnchor: anchorBar?.sourceTime ?? anchorBar?.time ?? "",
-          },
-        } satisfies RuleTraceItem,
-      ];
-      missingConditions.push("123 structure incomplete.");
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "pattern-123",
-          "123 structure incomplete",
-          "123 gate is still pending.",
-          "The reversal sequence is not fully mapped yet, so breakout confirmation remains unavailable.",
-          replayStartIndex +
-            Math.max(stopHuntIndex !== -1 ? stopHuntIndex : sourceIndex, 1),
-          trace,
-          anchorBar ? strategyTime(anchorBar) : undefined,
-        ),
-      );
-    }
-    if (five.length) {
-      for (let i = 1; i < five.length; i += 1) {
-        if (template === "FGD" && five[i].close > ema5[i]) {
-          emaIndex = i;
-          break;
-        }
-        if (template === "FRD" && five[i].close < ema5[i]) {
-          emaIndex = i;
-          break;
-        }
-      }
-      if (emaIndex !== -1) {
-        const anchorBar = five[emaIndex];
-        const global = scopedBars.findIndex(
-          (bar) => strategyTime(bar) === strategyTime(anchorBar),
-        );
-        const trace = [
-          {
-            ruleName: "20EMA confirm",
-            timeframe: "5m",
-            passed: true,
-            reason:
-              template === "FGD"
-                ? "5m close back above 20EMA."
-                : "5m close back below 20EMA.",
-            prices: { close: anchorBar.close, ema20: ema5[emaIndex] },
-            times: {
-              strategyBar: strategyTime(anchorBar),
-              sourceStart:
-                anchorBar.sourceStartTime ??
-                anchorBar.sourceTime ??
-                anchorBar.time,
-              sourceEnd:
-                anchorBar.sourceEndTime ??
-                anchorBar.sourceTime ??
-                anchorBar.time,
-            },
-          } satisfies RuleTraceItem,
-        ];
-        pushTraceEvent(
-          eventLog,
-          ruleTrace,
-          makeEvent(
-            "ema",
-            "20EMA confirm",
-            "Momentum returned through the 20EMA gate.",
-            trace[0].reason,
-            global,
-            trace,
-            strategyTime(anchorBar),
-          ),
-        );
-        annotations.push(
-          makeAnnotation(
-            "ema",
-            global,
-            strategyTime(anchorBar),
-            anchorBar.close,
-            "20EMA",
-            "5m EMA confirmation.",
-            trace,
-          ),
-        );
-      } else {
-        const anchorBar = five[five.length - 1];
-        const global = scopedBars.findIndex(
-          (bar) => strategyTime(bar) === strategyTime(anchorBar),
-        );
-        const trace = [
-          {
-            ruleName: "20EMA confirm",
-            timeframe: "5m",
-            passed: false,
-            reason:
-              template === "FGD"
-                ? "5m close has not reclaimed above the 20EMA yet."
-                : template === "FRD"
-                  ? "5m close has not rejected back below the 20EMA yet."
-                  : "20EMA gate is pending because the Day 3 template is incomplete.",
-            prices: {
-              close: anchorBar.close,
-              ema20: ema5[five.length - 1],
-              emaGapPips: pips(
-                Math.abs(anchorBar.close - ema5[five.length - 1]),
-              ),
-            },
-            times: {
-              strategyBar: strategyTime(anchorBar),
-              sourceStart:
-                anchorBar.sourceStartTime ??
-                anchorBar.sourceTime ??
-                anchorBar.time,
-              sourceEnd:
-                anchorBar.sourceEndTime ??
-                anchorBar.sourceTime ??
-                anchorBar.time,
-            },
-          } satisfies RuleTraceItem,
-        ];
-        missingConditions.push("20EMA confirm pending.");
-        pushTraceEvent(
-          eventLog,
-          ruleTrace,
-          makeEvent(
-            "ema",
-            "20EMA confirm pending",
-            "20EMA gate is still pending.",
-            "Momentum has not yet crossed the EMA gate required for entry validation.",
-            global,
-            trace,
-            strategyTime(anchorBar),
-          ),
-        );
-      }
-    }
-    if (p1 !== -1 && emaIndex !== -1 && sourcePrice !== undefined) {
-      entryIndex = Math.max(
-        replayStartIndex + breakout,
-        scopedBars.findIndex(
-          (bar) => strategyTime(bar) === strategyTime(five[emaIndex]),
-        ),
-      );
-      entryPrice = scopedBars[entryIndex]?.close;
-      const stopDistance =
-        entryPrice !== undefined && stopPrice !== undefined
-          ? pips(Math.abs(entryPrice - stopPrice))
-          : 999;
-      const trace = [
-        {
-          ruleName: "Entry gate",
-          timeframe: "1m",
-          passed: stopDistance <= 20,
-          reason:
-            stopDistance <= 20
-              ? "Entry valid with stop <= 20 pips."
-              : "Skip: stop too large.",
-          prices: {
-            entry: entryPrice ?? 0,
-            stop: stopPrice ?? 0,
-            stopDistance,
-          },
-          times: {
-            strategyEntry: strategyTime(scopedBars[entryIndex] ?? { time: "" }),
-            sourceEntry:
-              scopedBars[entryIndex]?.sourceTime ?? scopedBars[entryIndex]?.time ?? "",
-          },
-        } satisfies RuleTraceItem,
-      ];
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "entry",
-          stopDistance <= 20 ? "Entry valid" : "Skip: stop too large",
-          "Entry gate evaluated.",
-          stopDistance <= 20
-            ? "Entry valid — source, stop hunt, 123, and EMA gates align."
-            : "Skip: stop too large",
-          entryIndex,
-          trace,
-          strategyTime(scopedBars[entryIndex] ?? session[0]),
-        ),
-      );
-      annotations.push(
-        makeAnnotation(
-          "entry",
-          entryIndex,
-          strategyTime(scopedBars[entryIndex] ?? session[0]),
-          entryPrice ?? 0,
-          "Entry",
-          "Entry becomes valid only after all gates align.",
-          trace,
-        ),
-      );
-    } else {
-      const lastGateBar =
-        session[Math.max(stopHuntIndex, sourceIndex, 1)] ?? session[0];
-      const trace = [
-        {
-          ruleName: "Entry gate",
-          timeframe: "1m",
-          passed: false,
-          reason:
-            entryPrice === undefined
-              ? "Entry skipped because one or more prerequisite gates are still unavailable."
-              : "Entry skipped because the stop distance exceeded 20 pips.",
-          prices: {
-            source: sourcePrice ?? 0,
-            stop: stopPrice ?? 0,
-            currentClose: lastGateBar?.close ?? 0,
-            stopDistance:
-              stopPrice !== undefined
-                ? pips(Math.abs((lastGateBar?.close ?? stopPrice) - stopPrice))
-                : 0,
-          },
-          times: {
-            currentBar: lastGateBar ? strategyTime(lastGateBar) : "",
-            sourceCurrentBar:
-              lastGateBar?.sourceTime ?? lastGateBar?.time ?? "",
-          },
-        } satisfies RuleTraceItem,
-      ];
-      missingConditions.push("Entry skipped or unavailable.");
-      pushTraceEvent(
-        eventLog,
-        ruleTrace,
-        makeEvent(
-          "entry",
-          "Entry unavailable",
-          "Entry gate remains locked.",
-          "Entry cannot be offered until source, stop hunt, 123, and 20EMA gates line up with an acceptable stop distance.",
-          replayStartIndex + Math.max(stopHuntIndex, sourceIndex, 1),
-          trace,
-          lastGateBar ? strategyTime(lastGateBar) : undefined,
-        ),
-      );
-    }
-  }
-
-  const entryReady = entryIndex !== -1 && entryPrice !== undefined;
-  const stopHuntConfirmed = stopHuntIndex !== -1;
-  const pattern123Ready = p1 !== -1;
-  const emaConfirmed = emaIndex !== -1;
-  const maxFavorablePips = entryReady
-    ? scopedBars.slice(entryIndex).reduce((maxMove, bar) => {
-        const move =
-          template === "FGD"
-            ? pips(bar.high - (entryPrice ?? 0))
-            : pips((entryPrice ?? 0) - bar.low);
-        return Math.max(maxMove, move);
-      }, 0)
-    : 0;
-  const engulfmentReady = false;
-  // NOTE: The current engine does not model a dedicated engulfment rule yet.
-  // To avoid silently inventing one, TP40 only unlocks from the explicit
-  // stop-hunt branch already tracked in strategy state.
-  const tp30Eligible = entryReady && maxFavorablePips >= 15;
-  const tp35Eligible = entryReady && maxFavorablePips >= 30;
-  const tp40Eligible =
-    entryReady &&
-    maxFavorablePips >= 30 &&
-    (stopHuntConfirmed || engulfmentReady);
-  const tp50Eligible =
-    entryReady &&
-    stopHuntConfirmed &&
-    pattern123Ready &&
-    emaConfirmed &&
-    maxFavorablePips >= 35;
-
-  const tierReason = (tier: 30 | 35 | 40 | 50) =>
-    tier === 30
-      ? "Requires entry plus source/20EMA base state and move30 >= 15."
-      : tier === 35
-        ? "Requires TP35 upgrade: move30 >= 30."
-        : tier === 40
-          ? "Requires TP40 upgrade: move30 >= 30 plus stop hunt or engulfment."
-          : "Requires TP50 upgrade: stop hunt + 123 + 20EMA + move30 >= 35.";
+  if (sourceBar && sourcePrice !== undefined) annotations.push(makeAnnotation("source", replayStartIndex, strategyTime(sourceBar), sourcePrice, "Source", sourceLocationLabel, []));
+  if (stopPrice !== undefined && sourceBar) annotations.push(makeAnnotation("stop", replayStartIndex, strategyTime(sourceBar), stopPrice, "Stop", `Stop based on ${templateType === "FGD" ? "5m peak formation low" : "5m peak formation high"}.`, []));
+  if (entryBar && entryPrice !== undefined) annotations.push(makeAnnotation("entry", replayStartIndex, strategyTime(entryBar), entryPrice, "Entry", unifiedStrategy.entryReason, []));
 
   const targetLevels: TradeLevel[] = ([30, 35, 40, 50] as const).map((tier) => {
-    const price =
-      entryPrice === undefined
-        ? 0
-        : template === "FGD"
-          ? entryPrice + tier * 0.0001
-          : entryPrice - tier * 0.0001;
-    const eligible =
-      tier === 30
-        ? tp30Eligible
-        : tier === 35
-          ? tp35Eligible
-          : tier === 40
-            ? tp40Eligible
-            : tp50Eligible;
-    const missingGate = !entryReady
-      ? "Entry gate is still locked."
-      : tier === 30
-        ? maxFavorablePips >= 15
-          ? undefined
-          : `Need move30 >= 15; current favorable move is ${maxFavorablePips} pips.`
-        : tier === 35
-          ? maxFavorablePips >= 30
-            ? undefined
-            : `Need TP35 upgrade (move30 >= 30); current favorable move is ${maxFavorablePips} pips.`
-          : tier === 40
-            ? maxFavorablePips < 30
-              ? `Need TP40 upgrade move30 >= 30; current favorable move is ${maxFavorablePips} pips.`
-              : stopHuntConfirmed
-                ? undefined
-                : "Need TP40 upgrade gate: confirmed stop hunt (engulfment rule not modeled in current engine)."
-            : maxFavorablePips < 35
-              ? `Need TP50 upgrade move30 >= 35; current favorable move is ${maxFavorablePips} pips.`
-              : !stopHuntConfirmed
-                ? "Need TP50 upgrade gate: confirmed stop hunt."
-                : !pattern123Ready
-                  ? "Need TP50 upgrade gate: confirmed 1-2-3 structure."
-                  : !emaConfirmed
-                    ? "Need TP50 upgrade gate: 20EMA confirmation."
-                    : undefined;
-    const hit =
-      eligible &&
-      entryIndex !== -1 &&
-      scopedBars
-        .slice(entryIndex)
-        .some((bar) =>
-          template === "FGD" ? bar.high >= price : bar.low <= price,
-        );
-    return {
-      tier,
-      price,
-      eligible,
-      hit,
-      status: hit
-        ? "hit"
-        : eligible
-          ? "eligible"
-          : entryReady
-            ? "blocked"
-            : "pending",
-      reason: tierReason(tier),
-      missingGate,
-    };
-  });
-  const recommendedTarget = targetLevels
-    .filter((level) => level.eligible)
-    .slice(-1)[0]?.tier;
-  targetLevels.forEach((level) => {
-    if (entryIndex !== -1)
-      annotations.push(
-        makeAnnotation(
-          `tp${level.tier}` as Annotation["kind"],
-          entryIndex,
-          strategyTime(scopedBars[entryIndex]),
-          level.price,
-          `TP${level.tier}`,
-          level.reason,
-          [],
-        ),
-      );
-    const trace = [
-      {
-        ruleName: `Target tier TP${level.tier}`,
-        timeframe: "1m",
-        passed: level.eligible,
-        reason: level.hit
-          ? `TP${level.tier} is eligible and has been hit.`
-          : level.eligible
-            ? `TP${level.tier} is unlocked and waiting for price to hit ${level.price.toFixed(4)}.`
-            : `TP${level.tier} remains locked — ${level.missingGate ?? level.reason}`,
-        prices: {
-          entry: entryPrice ?? 0,
-          target: level.price,
-          maxFavorablePips,
-          eligible: level.eligible ? 1 : 0,
-        },
-        times: {
-          entryBar: entryIndex !== -1 ? strategyTime(scopedBars[entryIndex]) : "",
-          latestBar: strategyTime(scopedBars[scopedBars.length - 1] ?? { time: "" }),
-        },
-      } satisfies RuleTraceItem,
-    ];
-    pushTraceEvent(
-      eventLog,
-      ruleTrace,
-      makeEvent(
-        "management",
-        level.hit
-          ? `TP${level.tier} hit`
-          : level.eligible
-            ? `TP${level.tier} unlocked`
-            : `TP${level.tier} locked`,
-        `Target tier TP${level.tier} reviewed.`,
-        trace[0].reason,
-        entryIndex !== -1 ? entryIndex : replayStartIndex,
-        trace,
-        entryIndex !== -1 ? strategyTime(scopedBars[entryIndex]) : undefined,
-        { target: level.price },
-      ),
-    );
+    const price = entryPrice === undefined ? 0 : direction === "long" ? entryPrice + tier * 0.0001 : entryPrice - tier * 0.0001;
+    const hit = entryPrice !== undefined && scopedBars.slice(Math.max(replayStartIndex, scopedBars.findIndex((bar) => strategyTime(bar) === strategyTime(entryBar ?? scopedBars[replayStartIndex])))).some((bar) => direction === "long" ? bar.high >= price : bar.low <= price);
+    return { tier, price, eligible: unifiedStrategy.entryAllowed, hit, status: !unifiedStrategy.entryAllowed ? "blocked" : hit ? "hit" : "eligible", reason: `TP${tier} from unified entry basis.`, missingGate: unifiedStrategy.entryAllowed ? undefined : unifiedStrategy.entryReason };
   });
 
-  return {
+  targetLevels.forEach((level) => {
+    if (entryBar) annotations.push(makeAnnotation(`tp${level.tier}` as Annotation["kind"], replayStartIndex, strategyTime(entryBar), level.price, `TP${level.tier}`, level.reason, []));
+  });
+
+  const baseAnalysis: Omit<ReplayDatasetAnalysis, "backtestSnapshot"> = {
     datasetId,
     symbol,
     timeframeBars,
@@ -1303,15 +414,7 @@ export const buildReplayDatasetAnalysis = (
     selectedTradeDay: tradeDay,
     invalidReasons,
     missingConditions,
-    nextExpectation: eventLog.some(
-      (event) => event.stage === "entry" && event.title === "Entry valid",
-    )
-      ? "Manage TP30/35/40/50 and stop behavior."
-      : template === "FGD"
-        ? "Next: watch LOS source, stop hunt, 123, and 20EMA reclaim."
-        : template === "FRD"
-          ? "Next: watch HOS source, stop hunt, 123, and 20EMA rejection."
-          : "Next: fix dataset or load a different instrument file.",
+    nextExpectation: unifiedStrategy.entryAllowed ? "Manage TP30 / TP35 / TP40 / TP50 from unified score-qualified entry." : "Improve hard gates or weighted score toward 75+ before entry.",
     eventLog,
     ruleTrace,
     annotations,
@@ -1321,178 +424,38 @@ export const buildReplayDatasetAnalysis = (
     entryPrice,
     sourcePrice,
     previousClose,
-    hos: Number.isFinite(hos) ? hos : undefined,
-    los: Number.isFinite(los) ? los : undefined,
-    hod: Number.isFinite(hod) ? hod : undefined,
-    lod: Number.isFinite(lod) ? lod : undefined,
-    targetLevels,
-    recommendedTarget,
+    hos: session.length ? Math.max(...session.map((bar) => bar.high)) : undefined,
+    los: session.length ? Math.min(...session.map((bar) => bar.low)) : undefined,
+    hod: tradeGroup.length ? Math.max(...tradeGroup.map((bar) => bar.high)) : undefined,
+    lod: tradeGroup.length ? Math.min(...tradeGroup.map((bar) => bar.low)) : undefined,
+    targetLevels: invalidReasons.length ? blockedTargetLevels(template, invalidReasons[0]) : targetLevels,
+    recommendedTarget: unifiedStrategy.entryAllowed ? 50 : undefined,
+    unifiedStrategy,
   };
+
+  return { ...baseAnalysis, backtestSnapshot: buildBacktestSnapshot(baseAnalysis) };
 };
 
-const resolveCurrentTargetLevels = (
-  analysis: ReplayDatasetAnalysis,
-  currentBarIndex: number,
-): {
-  targetLevels: TradeLevel[];
-  recommendedTarget?: 30 | 35 | 40 | 50;
-} => {
-  const bars1m = analysis.timeframeBars["1m"];
-  if (datasetBlocksStageEngine(analysis)) {
-    return {
-      targetLevels: blockedTargetLevels(
-        analysis.template,
-        analysis.invalidReasons.length
-          ? "Dataset invalid — target tiers remain blocked until validation issues are fixed."
-          : "Template incomplete — target tiers stay pending until a full Day 3 setup is confirmed.",
-      ),
-      recommendedTarget: undefined,
-    };
+const resolveCurrentTargetLevels = (analysis: ReplayDatasetAnalysis, currentBarIndex: number): { targetLevels: TradeLevel[]; recommendedTarget?: 30 | 35 | 40 | 50 } => {
+  if (!analysis.unifiedStrategy.entryAllowed || analysis.entryPrice === undefined) {
+    return { targetLevels: analysis.targetLevels.map((level) => ({ ...level, eligible: false, status: "blocked", missingGate: analysis.unifiedStrategy.entryReason })), recommendedTarget: undefined };
   }
-  const entryEvent = analysis.eventLog.find(
-    (event) => event.stage === "entry" && event.title === "Entry valid",
-  );
-  const entryIndex =
-    entryEvent && entryEvent.visibleFromIndex <= currentBarIndex
-      ? entryEvent.visibleFromIndex
-      : -1;
-  const entryReady = entryIndex !== -1 && analysis.entryPrice !== undefined;
-  const stopHuntConfirmed = analysis.eventLog.some(
-    (event) =>
-      event.stage === "stop-hunt" &&
-      event.title === "Stop hunt confirmed" &&
-      event.visibleFromIndex <= currentBarIndex,
-  );
-  const pattern123Ready = analysis.eventLog.some(
-    (event) =>
-      event.stage === "pattern-123" &&
-      event.title === "123 structure ready" &&
-      event.visibleFromIndex <= currentBarIndex,
-  );
-  const emaConfirmed = analysis.eventLog.some(
-    (event) =>
-      event.stage === "ema" &&
-      event.title === "20EMA confirm" &&
-      event.visibleFromIndex <= currentBarIndex,
-  );
-  const visibleBars =
-    entryReady && analysis.entryPrice !== undefined
-      ? bars1m.slice(entryIndex, currentBarIndex + 1)
-      : [];
-  const maxFavorablePips = visibleBars.reduce((maxMove, bar) => {
-    const move =
-      analysis.template === "FGD"
-        ? pips(bar.high - (analysis.entryPrice ?? 0))
-        : pips((analysis.entryPrice ?? 0) - bar.low);
-    return Math.max(maxMove, move);
-  }, 0);
-
+  const entryIndex = Math.max(analysis.replayStartIndex, analysis.timeframeBars["1m"].findIndex((bar) => analysis.entryPrice !== undefined && Math.abs(bar.close - analysis.entryPrice) < 1e-9));
+  const visibleBars = analysis.timeframeBars["1m"].slice(entryIndex, currentBarIndex + 1);
   const targetLevels = analysis.targetLevels.map((level) => {
-    const eligible = !entryReady
-      ? false
-      : level.tier === 30
-        ? maxFavorablePips >= 15
-        : level.tier === 35
-          ? maxFavorablePips >= 30
-          : level.tier === 40
-            ? maxFavorablePips >= 30 && stopHuntConfirmed
-            : maxFavorablePips >= 35 &&
-              stopHuntConfirmed &&
-              pattern123Ready &&
-              emaConfirmed;
-    const missingGate = !entryReady
-      ? "Entry gate is still locked."
-      : level.tier === 30
-        ? maxFavorablePips >= 15
-          ? undefined
-          : `Need move30 >= 15; current favorable move is ${maxFavorablePips} pips.`
-        : level.tier === 35
-          ? maxFavorablePips >= 30
-            ? undefined
-            : `Need TP35 upgrade (move30 >= 30); current favorable move is ${maxFavorablePips} pips.`
-          : level.tier === 40
-            ? maxFavorablePips < 30
-              ? `Need TP40 upgrade move30 >= 30; current favorable move is ${maxFavorablePips} pips.`
-              : stopHuntConfirmed
-                ? undefined
-                : "Need TP40 upgrade gate: confirmed stop hunt (engulfment rule not modeled in current engine)."
-            : maxFavorablePips < 35
-              ? `Need TP50 upgrade move30 >= 35; current favorable move is ${maxFavorablePips} pips.`
-              : !stopHuntConfirmed
-                ? "Need TP50 upgrade gate: confirmed stop hunt."
-                : !pattern123Ready
-                  ? "Need TP50 upgrade gate: confirmed 1-2-3 structure."
-                  : !emaConfirmed
-                    ? "Need TP50 upgrade gate: 20EMA confirmation."
-                    : undefined;
-    const hit =
-      eligible &&
-      visibleBars.some((bar) =>
-        analysis.template === "FGD"
-          ? bar.high >= level.price
-          : bar.low <= level.price,
-      );
-    const status: TradeLevel["status"] = hit
-      ? "hit"
-      : eligible
-        ? "eligible"
-        : entryReady
-          ? "blocked"
-          : "pending";
-    return {
-      ...level,
-      eligible,
-      hit,
-      status,
-      missingGate,
-    };
+    const hit = visibleBars.some((bar) => analysis.unifiedStrategy.direction === "long" ? bar.high >= level.price : bar.low <= level.price);
+    return { ...level, eligible: true, hit, status: (hit ? "hit" : "eligible") as TradeLevel["status"], missingGate: undefined };
   });
-
-  return {
-    targetLevels,
-    recommendedTarget: targetLevels
-      .filter((level) => level.eligible)
-      .slice(-1)[0]?.tier,
-  };
+  return { targetLevels, recommendedTarget: targetLevels.filter((level) => level.hit).slice(-1)[0]?.tier ?? 30 };
 };
 
-export const buildReplayAnalysis = (
-  datasetAnalysis: ReplayDatasetAnalysis,
-  currentBarIndex: number,
-): ReplayAnalysis => ({
-  ...datasetAnalysis,
-  ...resolveCurrentTargetLevels(datasetAnalysis, currentBarIndex),
-  ...resolveReplayVisibility(datasetAnalysis, currentBarIndex),
-});
+export const buildReplayAnalysis = (datasetAnalysis: ReplayDatasetAnalysis, currentBarIndex: number): ReplayAnalysis => ({ ...datasetAnalysis, ...resolveCurrentTargetLevels(datasetAnalysis, currentBarIndex), ...resolveReplayVisibility(datasetAnalysis, currentBarIndex) });
 
-export const scanCandidateTradeDays = (
-  datasetId: string,
-  symbol: string,
-  bars1m: OhlcvBar[],
-): CandidateTradeDay[] => {
+export const scanCandidateTradeDays = (datasetId: string, symbol: string, bars1m: OhlcvBar[]): CandidateTradeDay[] => {
   const days = Object.keys(byNyDate(bars1m)).sort();
   return days.slice(2).map((tradeDay) => {
-    const analysis = buildReplayDatasetAnalysis(
-      datasetId,
-      symbol,
-      bars1m,
-      tradeDay,
-      undefined,
-    );
-    return {
-      date: tradeDay,
-      template: analysis.template,
-      practiceStatus: resolvePracticeStatus(
-        analysis.template,
-        analysis.invalidReasons,
-      ),
-      valid: !analysis.invalidReasons.length,
-      shortSummary: summarizeCandidate(
-        analysis.template,
-        analysis.invalidReasons,
-        analysis.missingConditions,
-      ),
-    };
+    const analysis = buildReplayDatasetAnalysis(datasetId, symbol, bars1m, tradeDay, undefined);
+    return { date: tradeDay, template: analysis.template, practiceStatus: resolvePracticeStatus(analysis.template, analysis.invalidReasons), valid: !analysis.invalidReasons.length && analysis.template !== "INCOMPLETE", shortSummary: summarizeCandidate(analysis.template, analysis.invalidReasons, analysis.missingConditions) };
   });
 };
 

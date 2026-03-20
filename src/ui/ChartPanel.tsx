@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import { annotationColor } from '../annotations/palette';
-import type { Annotation, OhlcvBar, RuleTraceItem } from '../types/domain';
+import type { Annotation, OhlcvBar, RuleTraceItem, UnifiedSignalDayStrategy } from '../types/domain';
 import { toNyLabel } from '../strategy/engine';
 
 interface ViewportRange {
@@ -31,6 +31,7 @@ interface Props {
   hod?: number;
   lod?: number;
   statusBanner: string;
+  unifiedStrategy: UnifiedSignalDayStrategy;
   viewport: ViewportRange;
   onViewportChange: (viewport: ViewportRange) => void;
 }
@@ -150,6 +151,7 @@ export function ChartPanel({
   hod,
   lod,
   statusBanner,
+  unifiedStrategy,
   viewport,
   onViewportChange,
 }: Props) {
@@ -284,6 +286,24 @@ export function ChartPanel({
   return (
     <section className="chart-shell">
       <div className="status-banner">{statusBanner}</div>
+      <div className="chart-stage-note">
+        Score: {unifiedStrategy.score}/100 · Band: {unifiedStrategy.scoreBand} · Entry allowed: {unifiedStrategy.entryAllowed ? 'yes' : 'no'}
+      </div>
+      <div className="chart-stage-note">
+        Direction: {unifiedStrategy.direction} · Template: {unifiedStrategy.templateType ?? 'n/a'}
+      </div>
+      <div className="chart-stage-note">
+        Hard gates: {unifiedStrategy.hardGates.map((gate) => `${gate.key}:${gate.passed ? 'pass' : 'fail'}`).join(' · ')}
+      </div>
+      <div className="chart-stage-note">
+        Score breakdown: {Object.entries(unifiedStrategy.debugBreakdown.byCategory).map(([category, score]) => `${category}=${score}`).join(' · ')}
+      </div>
+      <div className="chart-stage-note">
+        Top positive features: {unifiedStrategy.debugBreakdown.topPositiveFeatures.map((feature) => `${feature.key}(+${feature.contribution})`).join(' · ') || 'none'}
+      </div>
+      <div className="chart-stage-note">
+        Missing high-value features: {unifiedStrategy.debugBreakdown.missingHighValueFeatures.map((feature) => feature.key).join(' · ') || 'none'}
+      </div>
       <div className="chart-stage-note">
         Replay marker: {replayMarkerTime ? toNyLabel(replayMarkerTime) : 'n/a'}
       </div>

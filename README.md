@@ -19,6 +19,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
 - replay dataset 會保留以前後各 2 天為目標的事件視窗；若資料不足則使用可得區間
 - FGD / FRD Day 3 規則驗證與 replay analysis
+- FGD / FRD / FRD_INSIDE 已重構為單一 `Unified Signal-Day Scoring Engine`：共用 hard gates、weighted features、0-100 score、score band，以及 `score >= 75` 才允許 strategy entry 的規則
 - pair validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
 - Replay mode（Pause / Auto Replay / Semi Replay）與 Reply mode（Auto Reply / Manual Reply）分離，避免把播放方式與交易/練習模式混用
@@ -28,7 +29,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Manual Reply 的 entry 語義已統一：可明確選擇使用 strategy-confirmed `analysis.entryPrice`、user-specified execution price、或 current bar close；Explain Panel / Trade ledger / Diagnostics 會分開顯示 strategy entry 與 manual execution price，並讓 target ladder / stop distance / cumulative PnL 對齊同一組 entry basis
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
-- 新增 Debug Page，集中顯示策略流程參數、stage health、target state 與 needs-debug 清單
+- Chart / Debug Page 會即時顯示 current score、score band、hard gates、category breakdown、top positive features、missing high-value features、以及 entry blocked 原因
 - TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
 - 內建 sample mode：repo 提供 `data/pairs/sample-1m/raw/1m.csv`，可直接預處理並驗證完整 replay 流程
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
