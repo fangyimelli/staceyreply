@@ -225,64 +225,96 @@ const main = async () => {
   await rm(outputRoot, { recursive: true, force: true });
   await mkdir(outputRoot, { recursive: true });
 
-  const manifest = { datasetVersion: DATASET_VERSION, generatedAt: new Date().toISOString(), pairs: [] };
+  const manifest = { datasetVersion: DATASET_VERSION, generatedAt: new Date().toISOString(), diagnostics: { manifestPairCount: 0, missingPairFolders: [], skippedPairFolders: [] }, pairs: [] };
 
   for (const pairDir of pairDirs) {
     const slug = normalizeId(pairDir);
     const datasetId = `pair:${slug}`;
     const sourceLabel = path.posix.join('data', 'pairs', pairDir, 'raw', RAW_FILENAME);
     const sourcePath = path.join(dataRoot, pairDir, 'raw', RAW_FILENAME);
-    const raw = await readFile(sourcePath, 'utf8');
-    const parsed = parseRawCsvDataset({ datasetId, label: pairDir, sourceLabel, raw });
-    const candidateSummaries = buildCandidateSummaries(parsed, slug);
-    const pairOutputRoot = path.join(outputRoot, slug);
-    const eventsRoot = path.join(pairOutputRoot, 'events');
-    await mkdir(eventsRoot, { recursive: true });
 
-    for (const candidate of candidateSummaries) {
-      const eventWindow = sliceEventWindow(parsed.bars1m, candidate.candidateDate);
-      const precomputedTimeframeBars = buildTimeframeBarMap(eventWindow.bars);
-      const eventPayload = {
-        datasetId,
-        symbol: parsed.symbol,
-        sourceLabel,
-        parseStatus: parsed.parseStatus,
-        parseErrors: parsed.parseErrors,
-        parseDiagnostics: parsed.parseDiagnostics,
-        bars: eventWindow.bars,
-        bars1m: eventWindow.bars,
-        precomputedTimeframeBars,
-        eventId: candidate.eventId,
-        pair: parsed.symbol,
-        candidateDate: candidate.candidateDate,
-        template: candidate.template,
-        metadata: {
-          eventWindow: {
-            startDate: eventWindow.windowDays[0] ?? candidate.candidateDate,
-            endDate: eventWindow.windowDays[eventWindow.windowDays.length - 1] ?? candidate.candidateDate,
-            availableDates: eventWindow.windowDays,
+    try {
+      const raw = await readFile(sourcePath, 'utf8');
+      const parsed = parseRawCsvDataset({ datasetId, label: pairDir, sourceLabel, raw });
+      const candidateSummaries = buildCandidateSummaries(parsed, slug);
+      const pairOutputRoot = path.join(outputRoot, slug);
+      const eventsRoot = path.join(pairOutputRoot, 'events');
+      await mkdir(eventsRoot, { recursive: true });
+
+      for (const candidate of candidateSummaries) {
+        const eventWindow = sliceEventWindow(parsed.bars1m, candidate.candidateDate);
+        const precomputedTimeframeBars = buildTimeframeBarMap(eventWindow.bars);
+        const eventPayload = {
+          datasetId,
+          symbol: parsed.symbol,
+          sourceLabel,
+          parseStatus: parsed.parseStatus,
+          parseErrors: parsed.parseErrors,
+          parseDiagnostics: parsed.parseDiagnostics,
+          bars: eventWindow.bars,
+          bars1m: eventWindow.bars,
+          precomputedTimeframeBars,
+          eventId: candidate.eventId,
+          pair: slug,
+          candidateDate: candidate.candidateDate,
+          template: candidate.template,
+          metadata: {
+            eventWindow: {
+              startDate: eventWindow.windowDays[0] ?? candidate.candidateDate,
+              endDate: eventWindow.windowDays[eventWindow.windowDays.length - 1] ?? candidate.candidateDate,
+              availableDates: eventWindow.windowDays,
+            },
           },
-        },
+        };
+        await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload, null, 2)}
+`, 'utf8');
+      }
+
+      const indexPath = `preprocessed/${slug}/index.json`;
+      const pairIndex = {
+        pairId: datasetId,
+        pairLabel: pairDir.toUpperCase(),
+        sourceLabel,
+        datasetVersion: DATASET_VERSION,
+        pairKey: slug,
+        folderName: pairDir,
+        symbol: parsed.symbol,
+        candidates: candidateSummaries.map(({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath }) => ({
+          eventId,
+          candidateDate,
+          template,
+          shortSummary,
+          practiceStatus,
+          datasetPath,
+        })),
       };
-      await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload, null, 2)}\n`, 'utf8');
+      await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex, null, 2)}
+`, 'utf8');
+
+      const barsByDay = groupByNyDate(parsed.bars1m);
+      const allDays = Object.keys(barsByDay).sort();
+      manifest.pairs.push({
+        id: datasetId,
+        label: pairDir.toUpperCase(),
+        sourceLabel,
+        indexPath,
+        candidateCount: candidateSummaries.length,
+        dateRange: allDays.length ? { start: allDays[0], end: allDays[allDays.length - 1] } : null,
+        datasetVersion: DATASET_VERSION,
+        pairKey: slug,
+        folderName: pairDir,
+        symbol: parsed.symbol,
+      });
+    } catch (error) {
+      manifest.diagnostics.skippedPairFolders.push({
+        pairKey: slug,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
-
-    const indexPath = `preprocessed/${slug}/index.json`;
-    const pairIndex = { pairId: datasetId, pairLabel: pairDir.toUpperCase(), sourceLabel, datasetVersion: DATASET_VERSION, candidates: candidateSummaries.map(({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath }) => ({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath })) };
-    await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex, null, 2)}\n`, 'utf8');
-
-    const barsByDay = groupByNyDate(parsed.bars1m);
-    const allDays = Object.keys(barsByDay).sort();
-    manifest.pairs.push({
-      id: datasetId,
-      label: pairDir.toUpperCase(),
-      sourceLabel,
-      indexPath,
-      candidateCount: candidateSummaries.length,
-      dateRange: allDays.length ? { start: allDays[0], end: allDays[allDays.length - 1] } : null,
-      datasetVersion: DATASET_VERSION,
-    });
   }
+
+  manifest.diagnostics.manifestPairCount = manifest.pairs.length;
+  manifest.diagnostics.missingPairFolders = pairDirs.filter((pairDir) => !manifest.pairs.some((pair) => pair.folderName === pairDir));
 
   await writeFile(path.join(outputRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
   console.log(`Preprocessed ${manifest.pairs.length} pair(s) into public/preprocessed.`);

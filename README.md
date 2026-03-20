@@ -26,11 +26,11 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
 - Candidate list filter 可獨立切換 `Show all scanned days` / `Show needs-practice only`，不再綁定 replay 播放模式
 - Manual Reply 明確提供 Enter Long / Enter Short / Exit / Reset Trade，且 entry gate 直接綁定 `analysis.lastReplyEval`
-- Manual Reply 的 entry 語義已統一：可明確選擇使用 strategy-confirmed `analysis.entryPrice`、user-specified execution price、或 current bar close；Explain Panel / Trade ledger / Diagnostics 會分開顯示 strategy entry 與 manual execution price，並讓 target ladder / stop distance / cumulative PnL 對齊同一組 entry basis
+- Manual Reply 的 entry 語義已統一：可明確選擇使用 strategy `candidateEntryPrice` / `confirmedEntryPrice`、user-specified execution price、或 current bar close；當 hard gate 未通過時 UI 只顯示 candidate entry only / blocked entry basis，不再誤顯示 strategy-confirmed entry；Explain Panel / Trade ledger / Diagnostics 會分開顯示 candidate entry、confirmed entry 與 manual execution price，並讓 target ladder / stop distance / cumulative PnL 對齊同一組 entry basis
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - Chart / Debug Page 會即時顯示 current score、score band、hard gates、category breakdown、top positive features、missing high-value features、以及 entry blocked 原因
-- TP30 / TP35 / TP40 / TP50 目標梯級會顯示 unlocked / hit / blocked 狀態，並列出下一個 upgrade gate
+- TP30 / TP35 / TP40 / TP50 目標梯級會依 actual trade mode 或 blocked/hypothetical 狀態顯示；若 entry blocked，不再把 target 標成真實 hit，並會列出下一個 upgrade gate
 - 內建 sample mode：repo 提供 `data/pairs/sample-1m/raw/1m.csv`，可直接預處理並驗證完整 replay 流程
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
 - 圖表有 viewport state，預設追蹤右側最新已揭露 bars，支援滑鼠滾輪縮放與拖曳平移
@@ -67,7 +67,7 @@ npm run preprocess:data
 
 1. 掃描 `data/pairs/*/raw/1m.csv`
 2. parser 讀取 raw CSV 並轉成標準 1m bars
-3. 寫出 `public/preprocessed/manifest.json`
+3. 寫出 `public/preprocessed/manifest.json`，其中包含 pairKey / folderName / symbol 與 manifest pair diagnostics（manifest pair count、missing pair folders、skipped pair folders）
 4. 針對每個 pair 寫出 `public/preprocessed/<pair-slug>/index.json`
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
 6. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
