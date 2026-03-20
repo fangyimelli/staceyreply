@@ -7,6 +7,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 使用固定的 `data/` 原始資料契約：每個 pair 必須存放在 `data/pairs/<pair-slug>/raw/1m.csv`
 - 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars、輸出 manifest / pair index / 單一事件 replay dataset 產物
 - app 啟動時只讀 `public/preprocessed/manifest.json`，選 pair 時只讀對應 `index.json`，選中候選事件後才讀單一 event dataset，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
+- `index.json` 僅保留候選事件摘要欄位：`eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`；完整 `bars` / annotations / trace 只存在單一 event dataset 檔案
 - parser 主責任為讀取 raw CSV 並正規化為 strategy 可用的標準 1m bars
 - CSV 支援 BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
 - 自動辨識 MT fixed EST（UTC-5、no DST）tabular CSV，保留原始檔內容不改寫，只在預處理結果內建立 normalized strategy time

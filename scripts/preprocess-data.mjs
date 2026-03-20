@@ -158,7 +158,7 @@ const buildCandidateSummaries = (parsed, pairSlug) => {
     const template = fgd ? 'FGD' : frd ? 'FRD' : null;
     if (!template) return [];
     const eventId = buildEventId(tradeDay.day, template);
-    return [{ candidateDate: tradeDay.day, template, eventId, valid: true, practiceStatus: 'needs-practice', summaryReason: summarizeCandidate(template) }];
+    return [{ eventId, candidateDate: tradeDay.day, template, shortSummary: summarizeCandidate(template), practiceStatus: 'needs-practice', datasetPath: `preprocessed/${pairSlug}/events/${eventId}.json` }];
   });
 };
 const sliceEventWindow = (bars, candidateDate) => {
@@ -214,11 +214,10 @@ const main = async () => {
         },
       };
       await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload, null, 2)}\n`, 'utf8');
-      candidate.datasetPath = `preprocessed/${slug}/events/${candidate.eventId}.json`;
     }
 
     const indexPath = `preprocessed/${slug}/index.json`;
-    const pairIndex = { pairId: datasetId, pairLabel: pairDir.toUpperCase(), sourceLabel, datasetVersion: DATASET_VERSION, candidates: candidateSummaries.map(({ candidateDate, template, eventId, datasetPath, valid, practiceStatus, summaryReason }) => ({ candidateDate, template, eventId, datasetPath, valid, practiceStatus, summaryReason })) };
+    const pairIndex = { pairId: datasetId, pairLabel: pairDir.toUpperCase(), sourceLabel, datasetVersion: DATASET_VERSION, candidates: candidateSummaries.map(({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath }) => ({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath })) };
     await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex, null, 2)}\n`, 'utf8');
 
     const barsByDay = groupByNyDate(parsed.bars1m);
