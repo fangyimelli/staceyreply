@@ -14,6 +14,7 @@ import {
   createTradeExecution,
 } from "./strategy/pnl";
 import { priceDistanceInPips, targetPriceFromPips } from "./instruments";
+import { OFFICIAL_PAIR_LOOKUP, OFFICIAL_PAIR_KEYS } from "./officialPairs";
 import type {
   CandidateTradeDay,
   DatasetLoadErrorInfo,
@@ -36,7 +37,7 @@ import { ExplainPanel } from "./ui/ExplainPanel";
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
 const datasetImportMessage =
-  "App startup only reads preprocessed/manifest.json. Pair selection only reads that pair index.json. Candidate selection then lazily loads a single events/<eventId>.json payload.";
+  "App startup only reads preprocessed/manifest.json. Official pair selection only reads that pair index.json. Candidate selection then lazily loads a single events/<eventId>.json payload without falling back to sample-1m.";
 
 const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
@@ -120,7 +121,7 @@ export default function App() {
             sourceLabel: "/preprocessed/manifest.json",
             phase: "file-read",
             message:
-              "Preprocessed manifest is empty. Add a pair under data/pairs/<pair>/raw/1m.csv and rerun npm run preprocess:data.",
+              "Preprocessed manifest is empty. The official pair universe must include eurusd, usdcad, gbpusd, and audusd. Rerun npm run preprocess:data.",
           });
           setIsDatasetLoading(false);
         }
@@ -160,7 +161,11 @@ export default function App() {
     }
   }, [datasets, datasetId]);
 
+  const officialPairUniverse = manifestDiagnostics?.officialPairUniverse ?? OFFICIAL_PAIR_KEYS;
+  const manifestPairKeys = manifestDiagnostics?.manifestPairKeys ?? datasets.map((dataset) => dataset.pairKey);
+  const missingOfficialPairs = manifestDiagnostics?.missingOfficialPairs ?? officialPairUniverse.filter((pairKey) => !manifestPairKeys.includes(pairKey));
   const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0] ?? null;
+  const selectedOfficialPair = selectedDataset ? OFFICIAL_PAIR_LOOKUP[selectedDataset.pairKey] : undefined;
 
   useEffect(() => {
     if (!selectedDataset) return;
@@ -349,12 +354,19 @@ export default function App() {
       pairDiagnostics: {
         manifestPairCount: manifestDiagnostics?.manifestPairCount ?? datasets.length,
         visiblePairCount: datasets.length,
+        officialPairUniverse,
+        manifestPairKeys,
+        missingOfficialPairs,
         selectedPairKey: selectedDataset?.pairKey ?? datasetAnalysis.instrument.pairKey,
-        missingPairFolders: manifestDiagnostics?.missingPairFolders ?? [],
+        selectedPairCsvPath: selectedOfficialPair?.csvFile,
+        selectedPairPreprocessedFolder: selectedDataset ? `public/preprocessed/${selectedDataset.pairKey}` : undefined,
+        selectedPairPipSize: datasetAnalysis.instrument.pipSize,
+        selectedPairStopRule: `preferred ${datasetAnalysis.instrument.preferredStopPips ?? "n/a"} pips / max ${datasetAnalysis.instrument.maxStopPips ?? "n/a"} pips`,
+        missingPairFolders: manifestDiagnostics?.missingPairFolders ?? missingOfficialPairs,
         skippedPairFolders: manifestDiagnostics?.skippedPairFolders ?? [],
       },
     };
-  }, [datasetAnalysis, currentBarIndex, datasets.length, manifestDiagnostics, selectedDataset?.pairKey]);
+  }, [datasetAnalysis, currentBarIndex, datasets.length, manifestDiagnostics, missingOfficialPairs, officialPairUniverse, manifestPairKeys, selectedDataset, selectedOfficialPair]);
 
   useEffect(() => {
     if (!analysis || !activeDataset) return;
@@ -575,7 +587,7 @@ export default function App() {
           <label>
             Pair
             <select value={datasetId} onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}>
-              {datasets.map((dataset) => (
+              {datasets.filter((dataset) => OFFICIAL_PAIR_KEYS.includes(dataset.pairKey)).map((dataset) => (
                 <option key={dataset.id} value={dataset.id}>{datasetLabelText(dataset)}</option>
               ))}
             </select>
@@ -602,6 +614,11 @@ export default function App() {
             </select>
           </label>
         </section>
+        {missingOfficialPairs.length > 0 ? (
+          <section className="info-strip">
+            <div>Missing official pair: {missingOfficialPairs.join(", ")}</div>
+          </section>
+        ) : null}
         <section className="info-strip">
           <div>{infoStripMessage}</div>
           <div>Dataset source: {selectedDataset ? describeSourceType() : "none"}</div>
@@ -792,7 +809,7 @@ export default function App() {
         <label>
           Pair
           <select value={datasetId} onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}>
-            {datasets.map((dataset) => (
+            {datasets.filter((dataset) => OFFICIAL_PAIR_KEYS.includes(dataset.pairKey)).map((dataset) => (
               <option key={dataset.id} value={dataset.id}>{datasetLabelText(dataset)}</option>
             ))}
           </select>
@@ -881,6 +898,11 @@ export default function App() {
           </label>
         ) : null}
       </section>
+      {missingOfficialPairs.length > 0 ? (
+        <section className="info-strip">
+          <div>Missing official pair: {missingOfficialPairs.join(", ")}</div>
+        </section>
+      ) : null}
       <section className="info-strip">
         <div>Dataset status: {isDatasetLoading ? "loading" : "ready"}</div>
         <div>Dataset source: {describeSourceType()}</div>

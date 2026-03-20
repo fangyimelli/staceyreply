@@ -71,6 +71,7 @@ export function DebugPanel({
           <div><strong>Pending/manual entry price</strong><span>{formatPrice(pendingEntryPrice)}</span></div>
           <div><strong>Candidate entry price</strong><span>{formatPrice(analysis.candidateEntryPrice)}</span></div>
           <div><strong>Confirmed entry price</strong><span>{formatPrice(analysis.confirmedEntryPrice)}</span></div>
+          <div><strong>Entry display mode</strong><span>{analysis.confirmedEntryPrice !== undefined ? "strategy-confirmed entry" : "candidate only / blocked"}</span></div>
           <div><strong>Stop distance (pips/units)</strong><span>{formatPrice(effectiveStopDistance)}</span></div>
           <div><strong>Cumulative PnL</strong><span>{tradeState.cumulativePnL.toFixed(4)}</span></div>
           <div><strong>Backtest snapshot</strong><span>{JSON.stringify(analysis.backtestSnapshot)}</span></div>
@@ -155,7 +156,14 @@ export function DebugPanel({
           <li>Entry gate open: {entryGateOpen ? "true" : "false"}</li>
           <li>Manifest pair count: {analysis.pairDiagnostics?.manifestPairCount ?? "n/a"}</li>
           <li>Visible pair count in UI: {analysis.pairDiagnostics?.visiblePairCount ?? "n/a"}</li>
+          <li>Official pair universe: {analysis.pairDiagnostics?.officialPairUniverse.join(" | ") || "none"}</li>
+          <li>Manifest pair keys: {analysis.pairDiagnostics?.manifestPairKeys.join(" | ") || "none"}</li>
+          <li>Missing official pairs: {analysis.pairDiagnostics?.missingOfficialPairs.join(" | ") || "none"}</li>
           <li>Selected pair key: {analysis.pairDiagnostics?.selectedPairKey ?? "n/a"}</li>
+          <li>Selected pair csv path: {analysis.pairDiagnostics?.selectedPairCsvPath ?? "n/a"}</li>
+          <li>Selected pair preprocessed folder: {analysis.pairDiagnostics?.selectedPairPreprocessedFolder ?? "n/a"}</li>
+          <li>Selected pair pipSize: {analysis.pairDiagnostics?.selectedPairPipSize ?? "n/a"}</li>
+          <li>Selected pair stop rule: {analysis.pairDiagnostics?.selectedPairStopRule ?? "n/a"}</li>
           <li>Missing pair folders: {analysis.pairDiagnostics?.missingPairFolders.join(" | ") || "none"}</li>
           <li>Skipped pair folders: {analysis.pairDiagnostics?.skippedPairFolders.map((item) => `${item.pairKey}: ${item.reason}`).join(" | ") || "none"}</li>
         </ul>

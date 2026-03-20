@@ -57,6 +57,9 @@ export interface DatasetDateRange {
 
 export interface DatasetManifestDiagnostics {
   manifestPairCount: number;
+  officialPairUniverse: string[];
+  manifestPairKeys: string[];
+  missingOfficialPairs: string[];
   missingPairFolders: string[];
   skippedPairFolders: Array<{
     pairKey: string;
@@ -375,7 +378,14 @@ export interface ReplayDatasetAnalysis {
   pairDiagnostics?: {
     manifestPairCount: number;
     visiblePairCount: number;
+    officialPairUniverse: string[];
+    manifestPairKeys: string[];
+    missingOfficialPairs: string[];
     selectedPairKey: string;
+    selectedPairCsvPath?: string;
+    selectedPairPreprocessedFolder?: string;
+    selectedPairPipSize?: number;
+    selectedPairStopRule?: string;
     missingPairFolders: string[];
     skippedPairFolders: Array<{ pairKey: string; reason: string }>;
   };

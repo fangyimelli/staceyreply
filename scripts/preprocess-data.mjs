@@ -1,23 +1,54 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
-const dataRoot = path.join(repoRoot, 'data', 'pairs');
 const outputRoot = path.join(repoRoot, 'public', 'preprocessed');
-const DATASET_VERSION = 'v4';
-const RAW_FILENAME = '1m.csv';
+const DATASET_VERSION = 'v5';
 const ISO_WITH_OFFSET_PATTERN = /(Z|[+-]\d{2}:\d{2})$/i;
 const TIME_HEADER_ALIASES = new Set(['time', 'datetime', 'date', 'timestamp']);
 const VOLUME_HEADER_ALIASES = new Set(['volume', 'vol']);
 
+const OFFICIAL_PAIRS = [
+  {
+    displayName: 'EURUSD',
+    pairKey: 'eurusd',
+    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv',
+    assetClass: 'fx',
+    pipSize: 0.0001,
+    tickSize: 0.00001,
+  },
+  {
+    displayName: 'USDCAD',
+    pairKey: 'usdcad',
+    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_USDCAD_M1_2025.csv',
+    assetClass: 'fx',
+    pipSize: 0.0001,
+    tickSize: 0.00001,
+  },
+  {
+    displayName: 'GBPUSD',
+    pairKey: 'gbpusd',
+    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_GBPUSD_M1_2025.csv',
+    assetClass: 'fx',
+    pipSize: 0.0001,
+    tickSize: 0.00001,
+  },
+  {
+    displayName: 'AUDUSD',
+    pairKey: 'audusd',
+    csvFile: 'staceyreply/dist/mnt/data/DAT_MT_AUDUSD_M1_2025.csv',
+    assetClass: 'fx',
+    pipSize: 0.0001,
+    tickSize: 0.00001,
+  },
+];
+
 const replayTimeframes = ['1m', '5m', '15m', '1h', '4h', '1D'];
 const minutesByTf = { '1m': 1, '5m': 5, '15m': 15, '1h': 60, '4h': 240 };
 
-const normalizeId = (name) =>
-  name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const normalizeHeaderToken = (token) =>
   token.trim().toLowerCase().replace(/^\uFEFF/, '').replace(/[^a-z0-9]+/g, '');
 const resolveHeaderRole = (token) => {
@@ -219,25 +250,36 @@ const sliceEventWindow = (bars, candidateDate) => {
   return { windowDays, bars: windowDays.flatMap((day) => barsByDay[day]) };
 };
 
+const resolveCsvSourcePath = (csvFile) => path.join(repoRoot, csvFile.replace(/^staceyreply\//, ''));
+
 const main = async () => {
-  const entries = await readdir(dataRoot, { withFileTypes: true });
-  const pairDirs = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   await rm(outputRoot, { recursive: true, force: true });
   await mkdir(outputRoot, { recursive: true });
 
-  const manifest = { datasetVersion: DATASET_VERSION, generatedAt: new Date().toISOString(), diagnostics: { manifestPairCount: 0, missingPairFolders: [], skippedPairFolders: [] }, pairs: [] };
+  const manifest = {
+    datasetVersion: DATASET_VERSION,
+    generatedAt: new Date().toISOString(),
+    diagnostics: {
+      manifestPairCount: 0,
+      officialPairUniverse: OFFICIAL_PAIRS.map((pair) => pair.pairKey),
+      manifestPairKeys: [],
+      missingOfficialPairs: [],
+      missingPairFolders: [],
+      skippedPairFolders: [],
+    },
+    pairs: [],
+  };
 
-  for (const pairDir of pairDirs) {
-    const slug = normalizeId(pairDir);
-    const datasetId = `pair:${slug}`;
-    const sourceLabel = path.posix.join('data', 'pairs', pairDir, 'raw', RAW_FILENAME);
-    const sourcePath = path.join(dataRoot, pairDir, 'raw', RAW_FILENAME);
+  for (const pair of OFFICIAL_PAIRS) {
+    const datasetId = `pair:${pair.pairKey}`;
+    const sourcePath = resolveCsvSourcePath(pair.csvFile);
+    const sourceLabel = pair.csvFile;
 
     try {
       const raw = await readFile(sourcePath, 'utf8');
-      const parsed = parseRawCsvDataset({ datasetId, label: pairDir, sourceLabel, raw });
-      const candidateSummaries = buildCandidateSummaries(parsed, slug);
-      const pairOutputRoot = path.join(outputRoot, slug);
+      const parsed = parseRawCsvDataset({ datasetId, label: pair.displayName, sourceLabel, raw });
+      const candidateSummaries = buildCandidateSummaries(parsed, pair.pairKey);
+      const pairOutputRoot = path.join(outputRoot, pair.pairKey);
       const eventsRoot = path.join(pairOutputRoot, 'events');
       await mkdir(eventsRoot, { recursive: true });
 
@@ -255,7 +297,7 @@ const main = async () => {
           bars1m: eventWindow.bars,
           precomputedTimeframeBars,
           eventId: candidate.eventId,
-          pair: slug,
+          pair: pair.pairKey,
           candidateDate: candidate.candidateDate,
           template: candidate.template,
           metadata: {
@@ -266,18 +308,17 @@ const main = async () => {
             },
           },
         };
-        await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload, null, 2)}
-`, 'utf8');
+        await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload, null, 2)}\n`, 'utf8');
       }
 
-      const indexPath = `preprocessed/${slug}/index.json`;
+      const indexPath = `preprocessed/${pair.pairKey}/index.json`;
       const pairIndex = {
         pairId: datasetId,
-        pairLabel: pairDir.toUpperCase(),
+        pairLabel: pair.displayName,
         sourceLabel,
         datasetVersion: DATASET_VERSION,
-        pairKey: slug,
-        folderName: pairDir,
+        pairKey: pair.pairKey,
+        folderName: pair.pairKey,
         symbol: parsed.symbol,
         candidates: candidateSummaries.map(({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath }) => ({
           eventId,
@@ -288,36 +329,42 @@ const main = async () => {
           datasetPath,
         })),
       };
-      await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex, null, 2)}
-`, 'utf8');
+      await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex, null, 2)}\n`, 'utf8');
 
       const barsByDay = groupByNyDate(parsed.bars1m);
       const allDays = Object.keys(barsByDay).sort();
       manifest.pairs.push({
         id: datasetId,
-        label: pairDir.toUpperCase(),
+        label: pair.displayName,
         sourceLabel,
         indexPath,
         candidateCount: candidateSummaries.length,
         dateRange: allDays.length ? { start: allDays[0], end: allDays[allDays.length - 1] } : null,
         datasetVersion: DATASET_VERSION,
-        pairKey: slug,
-        folderName: pairDir,
+        pairKey: pair.pairKey,
+        folderName: pair.pairKey,
         symbol: parsed.symbol,
       });
     } catch (error) {
       manifest.diagnostics.skippedPairFolders.push({
-        pairKey: slug,
+        pairKey: pair.pairKey,
         reason: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   manifest.diagnostics.manifestPairCount = manifest.pairs.length;
-  manifest.diagnostics.missingPairFolders = pairDirs.filter((pairDir) => !manifest.pairs.some((pair) => pair.folderName === pairDir));
+  manifest.diagnostics.manifestPairKeys = manifest.pairs.map((pair) => pair.pairKey);
+  manifest.diagnostics.missingOfficialPairs = OFFICIAL_PAIRS.map((pair) => pair.pairKey).filter((pairKey) => !manifest.pairs.some((pair) => pair.pairKey === pairKey));
+  manifest.diagnostics.missingPairFolders = [...manifest.diagnostics.missingOfficialPairs];
 
   await writeFile(path.join(outputRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  console.log(`Preprocessed ${manifest.pairs.length} pair(s) into public/preprocessed.`);
+
+  if (manifest.diagnostics.missingOfficialPairs.length > 0) {
+    throw new Error(`Missing official pair(s): ${manifest.diagnostics.missingOfficialPairs.join(', ')}`);
+  }
+
+  console.log(`Preprocessed ${manifest.pairs.length} official pair(s) into public/preprocessed.`);
 };
 
 main().catch((error) => {

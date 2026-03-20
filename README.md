@@ -4,7 +4,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 
 ## Confirmed features
 
-- 使用固定的 `data/` 原始資料契約：每個 pair 必須存放在 `data/pairs/<pair-slug>/raw/1m.csv`
+- 正式 pair universe 固定為 `EURUSD` / `USDCAD` / `GBPUSD` / `AUDUSD`；正式模式只接受這 4 個 pair，並從 `dist/mnt/data/*.csv` 對應檔案預處理
 - 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars，並為每個候選事件預先輸出 5m / 15m / 1h / 4h / 1D bars 到單一 event replay dataset 產物
 - app 啟動時只讀 `public/preprocessed/manifest.json`，選 pair 時只讀對應 `index.json`，選中候選事件後才讀單一 event dataset，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
 - `index.json` 僅保留候選事件摘要欄位：`eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`；完整 `bars` / annotations / trace 只存在單一 event dataset 檔案
@@ -15,7 +15,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 策略 session/day bucket 一律使用 `America/New_York`
 - 1m / 5m / 15m / 1h / 4h / 1D timeframe 切換
 - 高週期以 1m 原始資料為唯一來源；預處理階段會先為每個候選事件寫入已預算的 5m / 15m / 1h / 4h / 1D bars，前端切換 timeframe 時優先讀取，缺資料時才回退到 runtime aggregation
-- pair-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
+- pair-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因；manifest diagnostics 會明確列出 official pair universe、manifest pair keys、以及 missing official pairs
 - Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
 - replay dataset 會保留以前後各 2 天為目標的事件視窗；若資料不足則使用可得區間
 - FGD / FRD Day 3 規則驗證與 replay analysis
@@ -31,7 +31,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
 - Chart / Debug Page 會即時顯示 current score、score band、hard gates、category breakdown、top positive features、missing high-value features、以及 entry blocked 原因
 - TP30 / TP35 / TP40 / TP50 目標梯級會依 actual trade mode 或 blocked/hypothetical 狀態顯示；若 entry blocked，不再把 target 標成真實 hit，並會列出下一個 upgrade gate
-- 內建 sample mode：repo 提供 `data/pairs/sample-1m/raw/1m.csv`，可直接預處理並驗證完整 replay 流程
+- sample-1m 若保留，只能屬於 sample/demo 流程；正式 pair selector 與正式資料載入流程不再 fallback 到 sample-1m
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
 - 圖表有 viewport state，預設追蹤右側最新已揭露 bars，支援滑鼠滾輪縮放與拖曳平移
 - 不串 broker API，只讀本機 `data/` 預處理產物
@@ -52,10 +52,10 @@ npm run dev
 
 重點如下：
 
-1. 原始資料只放在 `data/pairs/<pair-slug>/raw/1m.csv`
-2. 預處理腳本從 `data/` 讀 raw CSV
-3. 輸出 `public/preprocessed/manifest.json`、`public/preprocessed/<PAIR>/index.json` 與 `public/preprocessed/<PAIR>/events/<eventId>.json`
-4. app 依序 lazy-load 預處理結果
+1. 正式原始資料固定來自 `dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv`、`DAT_MT_USDCAD_M1_2025.csv`、`DAT_MT_GBPUSD_M1_2025.csv`、`DAT_MT_AUDUSD_M1_2025.csv`
+2. 預處理腳本只處理這 4 個官方 CSV，不再依賴資料夾掃描
+3. 輸出 `public/preprocessed/manifest.json`、`public/preprocessed/<pair>/index.json` 與 `public/preprocessed/<pair>/events/<eventId>.json`
+4. app 依序 lazy-load 預處理結果，正式模式不會 fallback 到 sample-1m
 
 ## Preprocessing flow
 
@@ -65,18 +65,19 @@ npm run preprocess:data
 
 流程：
 
-1. 掃描 `data/pairs/*/raw/1m.csv`
+1. 依 `OFFICIAL_PAIRS` registry 固定處理 `eurusd` / `usdcad` / `gbpusd` / `audusd` 4 個 CSV
 2. parser 讀取 raw CSV 並轉成標準 1m bars
-3. 寫出 `public/preprocessed/manifest.json`，其中包含 pairKey / folderName / symbol 與 manifest pair diagnostics（manifest pair count、missing pair folders、skipped pair folders）
-4. 針對每個 pair 寫出 `public/preprocessed/<pair-slug>/index.json`
+3. 寫出 `public/preprocessed/manifest.json`，其中包含 official pair universe / manifest pair keys / missing official pairs / skipped pair folders diagnostics
+4. 針對每個 official pair 寫出 `public/preprocessed/<pair-slug>/index.json`
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
-6. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
+6. 若缺任何 official pair，preprocessing 會報錯；app 也會顯示 missing official pair
+7. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
 
 ## Pair switching
 
-- 左上 `Pair` 下拉選單切換 manifest 內的商品 / replay pair
+- 左上 `Pair` 下拉選單只顯示 `EURUSD` / `USDCAD` / `GBPUSD` / `AUDUSD`
 - `Candidate Day 3` 會列出該 pair 掃描出的候選日期，而不是把整個 replay payload 直接當成單一 trade day
-- sample pair 來自 `data/pairs/sample-1m/raw/1m.csv`
+- 正式流程不再使用 sample-1m；若未來保留 sample mode，必須與正式 pair selector 分離
 - 不再顯示單檔 / 資料夾 / JSON 上傳流程；可用 pair 完全由預處理 manifest 決定，而候選事件由 pair index 驅動；pair 切換本身不會預先把全部 bars 載入
 
 ## Timeframe switching
