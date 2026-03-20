@@ -34,7 +34,6 @@ import { DebugPanel } from "./ui/DebugPanel";
 
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
-const preprocessedDatasetManifest = getPreprocessedDatasetManifest();
 
 const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
@@ -58,8 +57,7 @@ const formatTradeResult = (trade: TradeExecution | null) => {
 };
 const resetTradeState = (mode: ReplayPnLState["mode"]) => createReplayPnLState(mode);
 const describeSourceType = () => "Preprocessed replay library";
-const datasetLabelText = (dataset: DatasetManifestItem) =>
-  dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase();
+const datasetLabelText = (dataset: DatasetManifestItem) => dataset.label.toUpperCase();
 const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   if (phase === "file-read") return "file read";
   if (phase === "parse") return "parse";
@@ -69,10 +67,11 @@ const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
 
 export default function App() {
   const [page, setPage] = useState<"replay" | "debug">("replay");
-  const [datasetId, setDatasetId] = useState(preprocessedDatasetManifest[0]?.id ?? "");
+  const [datasetId, setDatasetId] = useState("");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
   const [datasetLoadError, setDatasetLoadError] = useState<DatasetLoadErrorInfo | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
+  const [datasets, setDatasets] = useState<DatasetManifestItem[]>([]);
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
   const [mode, setMode] = useState<ReplayMode>("pause");
   const [speed, setSpeed] = useState(400);
@@ -89,8 +88,55 @@ export default function App() {
   const previousBarsLengthRef = useRef(0);
   const semiPendingStopRef = useRef<number | null>(null);
 
-  const datasets = useMemo(() => preprocessedDatasetManifest, []);
 
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsDatasetLoading(true);
+    setDatasetLoadError(null);
+
+    getPreprocessedDatasetManifest()
+      .then((manifest) => {
+        if (cancelled) return;
+        setDatasets(manifest);
+        setDatasetId((current) => current || manifest[0]?.id || "");
+        if (!manifest.length) {
+          setDatasetLoadError({
+            datasetId: "manifest",
+            datasetLabel: "manifest",
+            sourceLabel: "/replay/manifest.json",
+            phase: "file-read",
+            message: "Replay manifest is empty. Add a pair under data/pairs/<pair>/raw/1m.csv and rerun npm run preprocess:data.",
+          });
+          setIsDatasetLoading(false);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setDatasets([]);
+        const loadError = error instanceof DatasetLoadError
+          ? {
+              datasetId: error.datasetId,
+              datasetLabel: error.datasetLabel,
+              sourceLabel: error.sourceLabel,
+              phase: error.phase,
+              message: error.message,
+            }
+          : {
+              datasetId: "manifest",
+              datasetLabel: "manifest",
+              sourceLabel: "/replay/manifest.json",
+              phase: "file-read" as const,
+              message: error instanceof Error ? error.message : String(error),
+            };
+        setDatasetLoadError(loadError);
+        setIsDatasetLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   useEffect(() => {
     if (!datasets.some((item) => item.id === datasetId)) {
       setDatasetId(datasets[0]?.id ?? "");
@@ -154,7 +200,7 @@ export default function App() {
             : {
                 datasetId: selectedDataset.id,
                 datasetLabel: selectedDataset.label,
-                sourceLabel: selectedDataset.path,
+                sourceLabel: selectedDataset.sourceLabel,
                 phase: "analysis-setup" as const,
                 message: error instanceof Error ? error.message : String(error),
               };

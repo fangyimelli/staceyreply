@@ -1,0 +1,10 @@
+[
+  {
+    "id": "pair:sample-1m",
+    "label": "SAMPLE-1M",
+    "sourceLabel": "data/pairs/sample-1m/raw/1m.csv",
+    "artifactPath": "replay/datasets/sample-1m.json",
+    "barCount": 240,
+    "parseStatus": "success"
+  }
+]

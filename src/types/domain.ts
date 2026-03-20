@@ -50,21 +50,13 @@ export interface OhlcvBar {
 
 export type UserDatasetSource = "preprocessed-manifest";
 
-export interface DatasetFile {
-  id: string;
-  label: string;
-  path: string;
-  kind: "csv" | "json";
-  raw: string;
-  sourceType: UserDatasetSource;
-}
-
 export interface DatasetManifestItem {
   id: string;
   label: string;
-  path: string;
-  kind: "csv" | "json";
-  sourceType: UserDatasetSource;
+  sourceLabel: string;
+  artifactPath: string;
+  barCount: number;
+  parseStatus: ParsedDataset["parseStatus"];
 }
 
 export interface ParsedDataset {
