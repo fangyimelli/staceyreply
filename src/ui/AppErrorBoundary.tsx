@@ -1,7 +1,8 @@
-import React from 'react';
+import { Component } from 'react';
+import type { ErrorInfo, ReactNode } from 'react';
 
 interface Props {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 interface State {
@@ -14,7 +15,7 @@ interface State {
 const createEventId = () =>
   `err-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-export class AppErrorBoundary extends React.Component<Props, State> {
+export class AppErrorBoundary extends Component<Props, State> {
   state: State = {
     error: null,
     componentStack: '',
@@ -30,7 +31,7 @@ export class AppErrorBoundary extends React.Component<Props, State> {
     };
   }
 
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
+  componentDidCatch(error: Error, info: ErrorInfo) {
     this.setState({ componentStack: info.componentStack || '' });
     console.error('Unhandled render error in Stacey Reply Replay.', error, info);
   }

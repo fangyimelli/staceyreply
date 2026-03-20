@@ -1,10 +1,12 @@
 import type {
   DatasetLoadFailurePhase,
   DatasetManifestItem,
-  ParsedDataset,
+  PairCandidateIndex,
+  PreprocessedManifest,
+  PreprocessedReplayEventDataset,
 } from '../types/domain';
 
-const MANIFEST_URL = '/replay/manifest.json';
+const MANIFEST_URL = '/preprocessed/manifest.json';
 
 export class DatasetLoadError extends Error {
   datasetId: string;
@@ -34,44 +36,68 @@ export class DatasetLoadError extends Error {
   }
 }
 
-export const getPreprocessedDatasetManifest = async (): Promise<DatasetManifestItem[]> => {
-  const response = await fetch(MANIFEST_URL);
+const loadJson = async <T,>({
+  url,
+  datasetId,
+  datasetLabel,
+  sourceLabel,
+}: {
+  url: string;
+  datasetId: string;
+  datasetLabel: string;
+  sourceLabel: string;
+}): Promise<T> => {
+  const response = await fetch(url);
   if (!response.ok) {
     throw new DatasetLoadError({
-      datasetId: 'manifest',
-      datasetLabel: 'manifest',
-      sourceLabel: MANIFEST_URL,
+      datasetId,
+      datasetLabel,
+      sourceLabel,
       phase: 'file-read',
-      message: `Unable to read replay manifest (${response.status}). Run npm run preprocess:data first.`,
-    });
-  }
-
-  return response.json() as Promise<DatasetManifestItem[]>;
-};
-
-export const loadParsedDataset = async (
-  manifest: DatasetManifestItem,
-): Promise<ParsedDataset> => {
-  const response = await fetch(`/${manifest.artifactPath}`);
-  if (!response.ok) {
-    throw new DatasetLoadError({
-      datasetId: manifest.id,
-      datasetLabel: manifest.label,
-      sourceLabel: manifest.artifactPath,
-      phase: 'file-read',
-      message: `Preprocessed pair payload was missing (${response.status}). Run npm run preprocess:data first.`,
+      message: `Unable to read preprocessed payload (${response.status}). Run npm run preprocess:data first.`,
     });
   }
 
   try {
-    return (await response.json()) as ParsedDataset;
+    return (await response.json()) as T;
   } catch (error) {
     throw new DatasetLoadError({
-      datasetId: manifest.id,
-      datasetLabel: manifest.label,
-      sourceLabel: manifest.artifactPath,
+      datasetId,
+      datasetLabel,
+      sourceLabel,
       phase: 'parse',
       message: error instanceof Error ? error.message : String(error),
     });
   }
 };
+
+export const getPreprocessedDatasetManifest = async (): Promise<DatasetManifestItem[]> => {
+  const manifest = await loadJson<PreprocessedManifest>({
+    url: MANIFEST_URL,
+    datasetId: 'manifest',
+    datasetLabel: 'manifest',
+    sourceLabel: MANIFEST_URL,
+  });
+  return manifest.pairs;
+};
+
+export const loadPairCandidateIndex = async (
+  manifest: DatasetManifestItem,
+): Promise<PairCandidateIndex> =>
+  loadJson<PairCandidateIndex>({
+    url: `/${manifest.indexPath}`,
+    datasetId: manifest.id,
+    datasetLabel: manifest.label,
+    sourceLabel: manifest.indexPath,
+  });
+
+export const loadReplayEventDataset = async (
+  manifest: DatasetManifestItem,
+  datasetPath: string,
+): Promise<PreprocessedReplayEventDataset> =>
+  loadJson<PreprocessedReplayEventDataset>({
+    url: `/${datasetPath}`,
+    datasetId: manifest.id,
+    datasetLabel: manifest.label,
+    sourceLabel: datasetPath,
+  });

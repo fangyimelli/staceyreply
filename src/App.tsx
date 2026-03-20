@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DatasetLoadError,
-  getBuiltinSampleManifest,
-  loadParsedDataset,
+  getPreprocessedDatasetManifest,
+  loadPairCandidateIndex,
+  loadReplayEventDataset,
 } from "./data/loadDatasets";
 import { nextStageStop } from "./replay/engine";
-import {
-  buildReplayAnalysis,
-  buildReplayDatasetAnalysis,
-  scanCandidateTradeDays,
-} from "./strategy/engine";
+import { buildReplayAnalysis, buildReplayDatasetAnalysis } from "./strategy/engine";
 import {
   closeTradeExecution,
   createReplayPnLState,
@@ -19,7 +16,9 @@ import type {
   CandidateTradeDay,
   DatasetLoadErrorInfo,
   DatasetManifestItem,
-  ParsedDataset,
+  PairCandidateIndex,
+  PairCandidateSummary,
+  PreprocessedReplayEventDataset,
   ReplayMode,
   ReplayPnLState,
   SelectedTradeDayState,
@@ -29,11 +28,13 @@ import type {
   TradeSide,
 } from "./types/domain";
 import { ChartPanel } from "./ui/ChartPanel";
-import { ExplainPanel } from "./ui/ExplainPanel";
 import { DebugPanel } from "./ui/DebugPanel";
+import { ExplainPanel } from "./ui/ExplainPanel";
 
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
+const datasetImportMessage =
+  "App startup only reads preprocessed/manifest.json. Pair selection only reads that pair index.json. Candidate selection then lazily loads a single events/<eventId>.json payload.";
 
 const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
@@ -63,22 +64,28 @@ const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   if (phase === "parse") return "parse";
   return "analysis setup";
 };
+const toCandidateTradeDay = (candidate: PairCandidateSummary): CandidateTradeDay => ({
+  date: candidate.candidateDate,
+  template: candidate.template,
+  practiceStatus: candidate.practiceStatus,
+  valid: candidate.valid,
+  summaryReason: candidate.summaryReason,
+});
 
 export default function App() {
   const [page, setPage] = useState<"replay" | "debug">("replay");
   const [datasetId, setDatasetId] = useState("");
-  const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
+  const [datasets, setDatasets] = useState<DatasetManifestItem[]>([]);
+  const [pairIndex, setPairIndex] = useState<PairCandidateIndex | null>(null);
+  const [selectedTradeDay, setSelectedTradeDay] = useState("");
+  const [activeDataset, setActiveDataset] = useState<PreprocessedReplayEventDataset | null>(null);
   const [datasetLoadError, setDatasetLoadError] = useState<DatasetLoadErrorInfo | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
-  const [datasets, setDatasets] = useState<DatasetManifestItem[]>([]);
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
   const [mode, setMode] = useState<ReplayMode>("pause");
   const [speed, setSpeed] = useState(400);
   const [currentBarIndex, setCurrentBarIndex] = useState(0);
-  const [selectedTradeDay, setSelectedTradeDay] = useState("");
-  const [tradeState, setTradeState] = useState<ReplayPnLState>(
-    createReplayPnLState("auto"),
-  );
+  const [tradeState, setTradeState] = useState<ReplayPnLState>(createReplayPnLState("auto"));
   const [manualEntryMode, setManualEntryMode] = useState<ManualEntryMode>("strategy");
   const [manualEntryInput, setManualEntryInput] = useState("");
   const [practiceFilterEnabled, setPracticeFilterEnabled] = useState(false);
@@ -86,8 +93,6 @@ export default function App() {
   const tradeIdRef = useRef(0);
   const previousBarsLengthRef = useRef(0);
   const semiPendingStopRef = useRef<number | null>(null);
-
-
 
   useEffect(() => {
     let cancelled = false;
@@ -103,9 +108,10 @@ export default function App() {
           setDatasetLoadError({
             datasetId: "manifest",
             datasetLabel: "manifest",
-            sourceLabel: "/replay/manifest.json",
+            sourceLabel: "/preprocessed/manifest.json",
             phase: "file-read",
-            message: "Replay manifest is empty. Add a pair under data/pairs/<pair>/raw/1m.csv and rerun npm run preprocess:data.",
+            message:
+              "Preprocessed manifest is empty. Add a pair under data/pairs/<pair>/raw/1m.csv and rerun npm run preprocess:data.",
           });
           setIsDatasetLoading(false);
         }
@@ -113,21 +119,22 @@ export default function App() {
       .catch((error) => {
         if (cancelled) return;
         setDatasets([]);
-        const loadError = error instanceof DatasetLoadError
-          ? {
-              datasetId: error.datasetId,
-              datasetLabel: error.datasetLabel,
-              sourceLabel: error.sourceLabel,
-              phase: error.phase,
-              message: error.message,
-            }
-          : {
-              datasetId: "manifest",
-              datasetLabel: "manifest",
-              sourceLabel: "/replay/manifest.json",
-              phase: "file-read" as const,
-              message: error instanceof Error ? error.message : String(error),
-            };
+        const loadError =
+          error instanceof DatasetLoadError
+            ? {
+                datasetId: error.datasetId,
+                datasetLabel: error.datasetLabel,
+                sourceLabel: error.sourceLabel,
+                phase: error.phase,
+                message: error.message,
+              }
+            : {
+                datasetId: "manifest",
+                datasetLabel: "manifest",
+                sourceLabel: "/preprocessed/manifest.json",
+                phase: "file-read" as const,
+                message: error instanceof Error ? error.message : String(error),
+              };
         setDatasetLoadError(loadError);
         setIsDatasetLoading(false);
       });
@@ -136,53 +143,136 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
   useEffect(() => {
     if (!datasets.some((item) => item.id === datasetId)) {
       setDatasetId(datasets[0]?.id ?? "");
     }
   }, [datasets, datasetId]);
 
+  const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0] ?? null;
+
   useEffect(() => {
-    const selectedDataset =
-      datasets.find((item) => item.id === datasetId) ?? datasets[0];
     if (!selectedDataset) return;
 
     let cancelled = false;
     setIsDatasetLoading(true);
     setDatasetLoadError(null);
+    setPairIndex(null);
+    setActiveDataset(null);
+    setSelectedTradeDay("");
     setMode("pause");
 
-    loadParsedDataset(selectedDataset)
+    loadPairCandidateIndex(selectedDataset)
+      .then((index) => {
+        if (cancelled) return;
+        setPairIndex(index);
+        setSelectedTradeDay(index.candidates[0]?.candidateDate ?? "");
+        if (!index.candidates.length) {
+          setIsDatasetLoading(false);
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const loadError =
+          error instanceof DatasetLoadError
+            ? {
+                datasetId: error.datasetId,
+                datasetLabel: error.datasetLabel,
+                sourceLabel: error.sourceLabel,
+                phase: error.phase,
+                message: error.message,
+              }
+            : {
+                datasetId: selectedDataset.id,
+                datasetLabel: selectedDataset.label,
+                sourceLabel: selectedDataset.indexPath,
+                phase: "analysis-setup" as const,
+                message: error instanceof Error ? error.message : String(error),
+              };
+        setDatasetLoadError(loadError);
+        setIsDatasetLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDataset]);
+
+  const availableTradeDays = useMemo<CandidateTradeDay[]>(
+    () => (pairIndex?.candidates ?? []).map(toCandidateTradeDay),
+    [pairIndex],
+  );
+
+  const isPracticeMode = tradeState.mode === "manual" || practiceFilterEnabled;
+
+  const visibleCandidateTradeDays = useMemo<CandidateTradeDay[]>(() => {
+    return isPracticeMode
+      ? availableTradeDays.filter((candidate) => candidate.practiceStatus === "needs-practice")
+      : availableTradeDays;
+  }, [availableTradeDays, isPracticeMode]);
+
+  const selectedTradeDayState = useMemo<SelectedTradeDayState | null>(() => {
+    if (!availableTradeDays.length) return null;
+    return {
+      selectedTradeDay: selectedTradeDay || availableTradeDays[0]?.date || "",
+      availableTradeDays,
+    };
+  }, [availableTradeDays, selectedTradeDay]);
+
+  useEffect(() => {
+    if (!selectedTradeDayState) return;
+    const explicitSelection = selectedTradeDay;
+    if (
+      explicitSelection &&
+      selectedTradeDayState.availableTradeDays.some((candidate) => candidate.date === explicitSelection)
+    ) {
+      return;
+    }
+
+    const nextTradeDay =
+      visibleCandidateTradeDays[0]?.date ?? selectedTradeDayState.availableTradeDays[0]?.date ?? "";
+    if (nextTradeDay !== selectedTradeDayState.selectedTradeDay) {
+      setSelectedTradeDay(nextTradeDay);
+    }
+  }, [selectedTradeDay, selectedTradeDayState, visibleCandidateTradeDays]);
+
+  useEffect(() => {
+    if (!selectedDataset || !pairIndex || !selectedTradeDay) return;
+    const selectedCandidate = pairIndex.candidates.find(
+      (candidate) => candidate.candidateDate === selectedTradeDay,
+    );
+    if (!selectedCandidate) return;
+
+    let cancelled = false;
+    setIsDatasetLoading(true);
+    setDatasetLoadError(null);
+    setActiveDataset(null);
+    setMode("pause");
+
+    loadReplayEventDataset(selectedDataset, selectedCandidate.datasetPath)
       .then((dataset) => {
         if (cancelled) return;
-        if (dataset.parseStatus !== "error") {
-          try {
-            const candidateTradeDays = scanCandidateTradeDays(
-              dataset.datasetId,
-              dataset.symbol,
-              dataset.bars1m,
-            );
-            void buildReplayDatasetAnalysis(
-              dataset.datasetId,
-              dataset.symbol,
-              dataset.bars1m,
-              selectedTradeDay || candidateTradeDays[0]?.date,
-            );
-          } catch (error) {
-            throw new DatasetLoadError({
-              datasetId: dataset.datasetId,
-              datasetLabel: selectedDataset.label,
-              sourceLabel: dataset.sourceLabel,
-              phase: "analysis-setup",
-              message: error instanceof Error ? error.message : String(error),
-            });
-          }
+        try {
+          void buildReplayDatasetAnalysis(
+            dataset.datasetId,
+            dataset.symbol,
+            dataset.bars1m,
+            dataset.candidateDate,
+          );
+          setActiveDataset(dataset);
+          setCurrentBarIndex(0);
+          setTradeState((prev) => resetTradeState(prev.mode));
+          setIsDatasetLoading(false);
+        } catch (error) {
+          throw new DatasetLoadError({
+            datasetId: dataset.datasetId,
+            datasetLabel: selectedDataset.label,
+            sourceLabel: selectedCandidate.datasetPath,
+            phase: "analysis-setup",
+            message: error instanceof Error ? error.message : String(error),
+          });
         }
-        setActiveDataset(dataset);
-        setSelectedTradeDay("");
-        setCurrentBarIndex(0);
-        setTradeState((prev) => resetTradeState(prev.mode));
-        setIsDatasetLoading(false);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -199,7 +289,7 @@ export default function App() {
             : {
                 datasetId: selectedDataset.id,
                 datasetLabel: selectedDataset.label,
-                sourceLabel: selectedDataset.sourceLabel,
+                sourceLabel: selectedCandidate.datasetPath,
                 phase: "analysis-setup" as const,
                 message: error instanceof Error ? error.message : String(error),
               };
@@ -210,47 +300,18 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [datasetFilesById, datasets, datasetId]);
+  }, [pairIndex, selectedDataset, selectedTradeDay]);
 
   const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
     if (activeDataset.parseStatus === "error") return null;
-    const candidateTradeDays = scanCandidateTradeDays(
-      activeDataset.datasetId,
-      activeDataset.symbol,
-      activeDataset.bars1m,
-    );
     return buildReplayDatasetAnalysis(
       activeDataset.datasetId,
       activeDataset.symbol,
       activeDataset.bars1m,
-      selectedTradeDay || candidateTradeDays[0]?.date,
+      activeDataset.candidateDate,
     );
-  }, [activeDataset, selectedTradeDay]);
-
-  const selectedTradeDayState = useMemo<SelectedTradeDayState | null>(() => {
-    if (!activeDataset || activeDataset.parseStatus === "error") return null;
-    const availableTradeDays = scanCandidateTradeDays(
-      activeDataset.datasetId,
-      activeDataset.symbol,
-      activeDataset.bars1m,
-    );
-    return {
-      selectedTradeDay: selectedTradeDay || availableTradeDays[0]?.date || "",
-      availableTradeDays,
-    };
-  }, [activeDataset, selectedTradeDay]);
-
-  const isPracticeMode = tradeState.mode === "manual" || practiceFilterEnabled;
-
-  const visibleCandidateTradeDays = useMemo<CandidateTradeDay[]>(() => {
-    const candidates = selectedTradeDayState?.availableTradeDays ?? [];
-    return isPracticeMode
-      ? candidates.filter(
-          (candidate) => candidate.practiceStatus === "needs-practice",
-        )
-      : candidates;
-  }, [isPracticeMode, selectedTradeDayState]);
+  }, [activeDataset]);
 
   const analysis = useMemo(() => {
     if (!datasetAnalysis) return null;
@@ -261,29 +322,7 @@ export default function App() {
     if (!analysis || !activeDataset) return;
     setCurrentBarIndex(analysis.replayStartIndex);
     setTradeState((prev) => resetTradeState(prev.mode));
-  }, [activeDataset?.datasetId, analysis?.replayStartIndex, analysis?.selectedTradeDay]);
-
-  useEffect(() => {
-    if (!selectedTradeDayState) return;
-
-    const explicitSelection = selectedTradeDay;
-    if (
-      explicitSelection &&
-      selectedTradeDayState.availableTradeDays.some(
-        (candidate) => candidate.date === explicitSelection,
-      )
-    ) {
-      return;
-    }
-
-    const nextTradeDay = visibleCandidateTradeDays[0]?.date
-      ?? selectedTradeDayState.availableTradeDays[0]?.date
-      ?? "";
-
-    if (nextTradeDay !== selectedTradeDayState.selectedTradeDay) {
-      setSelectedTradeDay(nextTradeDay);
-    }
-  }, [selectedTradeDay, selectedTradeDayState, visibleCandidateTradeDays]);
+  }, [activeDataset?.eventId, analysis?.replayStartIndex, analysis?.selectedTradeDay]);
 
   const getAdvanceTarget = (barIndex: number) => {
     if (!analysis) return barIndex;
@@ -307,8 +346,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!analysis) return;
-    if (mode !== "auto") return;
+    if (!analysis || mode !== "auto") return;
     const timer = window.setTimeout(() => {
       setCurrentBarIndex((value) => Math.min(value + 1, analysis.replayEndIndex));
     }, speed);
@@ -334,9 +372,13 @@ export default function App() {
     }
   }, [mode, analysis, currentBarIndex]);
 
+  const replayBars1m = analysis?.timeframeBars["1m"] ?? [];
+  const clampedCurrentBarIndex = Math.min(currentBarIndex, Math.max(replayBars1m.length - 1, 0));
+  const currentReplayBar = replayBars1m[clampedCurrentBarIndex];
+  const currentReplayTime = currentReplayBar?.time;
+
   useEffect(() => {
-    if (!analysis) return;
-    if (tradeState.mode !== "auto") return;
+    if (!analysis || tradeState.mode !== "auto") return;
     const side = tradeSideForTemplate(analysis.template);
     const bar = currentReplayBar;
     if (!side || !bar) return;
@@ -344,10 +386,7 @@ export default function App() {
     setTradeState((prev) => {
       if (prev.mode !== "auto") return prev;
       const entryUnlocked = analysis.visibleEvents.some(
-        (event) =>
-          event.stage === "entry" &&
-          event.title === "Entry valid" &&
-          event.visibleFromIndex <= currentBarIndex,
+        (event) => event.stage === "entry" && event.title === "Entry valid" && event.visibleFromIndex <= currentBarIndex,
       );
       let nextState = prev;
 
@@ -375,23 +414,13 @@ export default function App() {
       const hitStop =
         analysis.stopPrice !== undefined &&
         (side === "long" ? bar.low <= analysis.stopPrice : bar.high >= analysis.stopPrice);
-      const hitTarget = analysis.targetLevels
-        .filter((level) => level.hit)
-        .slice(-1)[0];
+      const hitTarget = analysis.targetLevels.filter((level) => level.hit).slice(-1)[0];
       const atReplayEnd = currentBarIndex >= analysis.replayEndIndex;
 
       if (!hitStop && !hitTarget && !atReplayEnd) return nextState;
 
-      const exitPrice = hitStop
-        ? analysis.stopPrice!
-        : hitTarget
-          ? hitTarget.price
-          : bar.close;
-      const exitReason = hitStop
-        ? "stop"
-        : hitTarget
-          ? `TP${hitTarget.tier}`
-          : "replay-end";
+      const exitPrice = hitStop ? analysis.stopPrice! : hitTarget ? hitTarget.price : bar.close;
+      const exitReason = hitStop ? "stop" : hitTarget ? `TP${hitTarget.tier}` : "replay-end";
       const closedTrade = closeTradeExecution(position, {
         exitPrice,
         exitBarIndex: currentBarIndex,
@@ -407,15 +436,7 @@ export default function App() {
         cumulativePnL: closedTrade.cumulativePnL,
       };
     });
-  }, [analysis, currentBarIndex, tradeState.mode]);
-
-  const replayBars1m = analysis?.timeframeBars["1m"] ?? [];
-  const clampedCurrentBarIndex = Math.min(
-    currentBarIndex,
-    Math.max(replayBars1m.length - 1, 0),
-  );
-  const currentReplayBar = replayBars1m[clampedCurrentBarIndex];
-  const currentReplayTime = currentReplayBar?.time;
+  }, [analysis, currentBarIndex, currentReplayBar, tradeState.mode]);
 
   if (analysis) {
     const timeframeBars = analysis.timeframeBars[timeframe];
@@ -435,11 +456,13 @@ export default function App() {
       (bar) => new Date(bar.time).getTime() <= new Date(currentReplayTime).getTime(),
     );
   }, [analysis, timeframe, currentReplayTime]);
+
   const ema20 = useMemo(() => {
     const k = 2 / (20 + 1);
     let prev = bars[0]?.close ?? 0;
     return bars.map((bar) => (prev = bar.close * k + prev * (1 - k)));
   }, [bars]);
+
   const visibleAnnotations = analysis?.visibleAnnotations ?? [];
 
   useEffect(() => {
@@ -466,11 +489,7 @@ export default function App() {
         };
       }
 
-      const startIndex = Math.min(
-        prev.startIndex,
-        Math.max(bars.length - desiredSize, 0),
-      );
-
+      const startIndex = Math.min(prev.startIndex, Math.max(bars.length - desiredSize, 0));
       return {
         startIndex,
         endIndex: Math.min(startIndex + desiredSize - 1, maxIndex),
@@ -480,96 +499,47 @@ export default function App() {
     previousBarsLengthRef.current = bars.length;
   }, [bars]);
 
-  const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0] ?? null;
-  const selectedDatasetLabel = selectedDataset ? datasetLabelText(selectedDataset) : "UNKNOWN";
   const selectedCandidate =
-    selectedTradeDayState?.availableTradeDays.find(
-      (candidate) => candidate.date === analysis?.selectedTradeDay,
-    ) ?? visibleCandidateTradeDays[0];
+    pairIndex?.candidates.find((candidate) => candidate.candidateDate === analysis?.selectedTradeDay) ??
+    pairIndex?.candidates[0];
 
   if (!activeDataset || !analysis) {
     return (
       <div className="app-shell">
         <header>
           <h1>Stacey Reply Replay</h1>
-          <p>
-            Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.
-          </p>
+          <p>Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.</p>
         </header>
         <section className="upload-grid">
           <div className="upload-card">
             <h3>Replay dataset flow</h3>
             <p>{datasetImportMessage}</p>
-            <p className="upload-note">
-              Fixed `data/` raw CSV → preprocessing → pair selection → automatic replay dataset load.
-            </p>
+            <p className="upload-note">Fixed `data/` raw CSV → preprocessing → manifest → pair index → single event load.</p>
           </div>
         </section>
         <section className="control-grid">
-        <button
-          className={page === "replay" ? "active-toggle" : ""}
-          onClick={() => setPage("replay")}
-        >
-          Replay Page
-        </button>
-        <button
-          className={page === "debug" ? "active-toggle" : ""}
-          onClick={() => setPage("debug")}
-        >
-          Debug Page
-        </button>
+          <button className={page === "replay" ? "active-toggle" : ""} onClick={() => setPage("replay")}>Replay Page</button>
+          <button className={page === "debug" ? "active-toggle" : ""} onClick={() => setPage("debug")}>Debug Page</button>
           <label>
             Pair
-            <select
-              value={datasetId}
-              onChange={(e: { target: { value: string } }) =>
-                setDatasetId(e.target.value)
-              }
-            >
+            <select value={datasetId} onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}>
               {datasets.map((dataset) => (
-                <option key={dataset.id} value={dataset.id}>
-                  {datasetLabelText(dataset)}
-                </option>
+                <option key={dataset.id} value={dataset.id}>{datasetLabelText(dataset)}</option>
               ))}
             </select>
           </label>
           <label>
             Candidate Day 3
-            <select
-              value={selectedTradeDayState?.selectedTradeDay ?? ""}
-              onChange={(e: { target: { value: string } }) =>
-                setSelectedTradeDay(e.target.value)
-              }
-              disabled
-            >
-              <option value="">
-                {activeDataset?.parseStatus === "error"
-                  ? "Dataset scan unavailable"
-                  : "Wait for pair scan to complete"}
-              </option>
+            <select value={selectedTradeDayState?.selectedTradeDay ?? ""} onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)} disabled>
+              <option value="">{pairIndex ? "Wait for event load to complete" : "Wait for pair index to load"}</option>
             </select>
           </label>
         </section>
         <section className="info-strip">
-          <div>
-            {isDatasetLoading
-              ? "Loading dataset…"
-              : datasetLoadError
-                ? "Pair loader failed."
-              : activeDataset?.parseStatus === "error"
-                ? "Dataset parse failed."
-                : "Pair scan pending or unavailable."}
-          </div>
+          <div>{isDatasetLoading ? "Loading preprocessed data…" : datasetLoadError ? "Pair loader failed." : "Event payload pending or unavailable."}</div>
           <div>Dataset source: {selectedDataset ? describeSourceType() : "none"}</div>
           {!isDatasetLoading && datasetLoadError ? (
-            <div>
-              Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}
-            </div>
-          ) : null}
-          {!isDatasetLoading && activeDataset?.parseStatus === "error" ? (
-            <div>
-              Why unavailable: {activeDataset.parseErrors[0] ?? "Unknown parse error."}
-            </div>
+            <div>Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}</div>
           ) : null}
         </section>
         {!isDatasetLoading && datasetLoadError ? (
@@ -587,23 +557,6 @@ export default function App() {
             </div>
           </section>
         ) : null}
-        {!isDatasetLoading && activeDataset?.parseStatus === "error" ? (
-          <section className="footer-grid">
-            <div>
-              <h3>Diagnostics</h3>
-              <ul>
-                <li>Dataset: {selectedDatasetLabel}</li>
-                <li>Dataset file: {activeDataset.sourceLabel}</li>
-                <li>Dataset source: {describeSourceType()}</li>
-                <li>Parse status: {activeDataset.parseStatus}</li>
-                <li>Failure reasons: {activeDataset.parseErrors.join(" | ")}</li>
-                <li>
-                  Accepted formats / notes: {activeDataset.parseDiagnostics.join(" | ") || "none"}
-                </li>
-              </ul>
-            </div>
-          </section>
-        ) : null}
       </div>
     );
   }
@@ -617,30 +570,19 @@ export default function App() {
     setCurrentBarIndex(analysis.replayStartIndex);
     setTradeState((prev) => resetTradeState(prev.mode));
   };
-  const nextStep = () => {
-    setReplayBehavior("advanceToNextStage");
-  };
-  const playAuto = () => setReplayBehavior("auto");
-  const playSemi = () => setReplayBehavior("semi");
   const continueNextStep = () => {
     setReplayBehavior("pause");
-    nextStep();
+    setReplayBehavior("advanceToNextStage");
   };
   const manualTradeDisabled =
-    tradeState.mode !== "manual" ||
-    tradeState.currentPosition !== null ||
-    !analysis.lastReplyEval.canReply;
+    tradeState.mode !== "manual" || tradeState.currentPosition !== null || !analysis.lastReplyEval.canReply;
   const manualSide = tradeSideForTemplate(analysis.template);
   const entryGateOpen = analysis.visibleEvents.some(
-    (event) =>
-      event.stage === "entry" &&
-      event.title === "Entry valid" &&
-      event.visibleFromIndex <= currentBarIndex,
+    (event) => event.stage === "entry" && event.title === "Entry valid" && event.visibleFromIndex <= currentBarIndex,
   );
   const current1mBar = currentReplayBar;
   const parsedManualEntryInput = Number(manualEntryInput);
-  const hasManualEntryInput =
-    manualEntryInput.trim().length > 0 && Number.isFinite(parsedManualEntryInput);
+  const hasManualEntryInput = manualEntryInput.trim().length > 0 && Number.isFinite(parsedManualEntryInput);
   const resolvedEntryConfig = (() => {
     if (tradeState.mode !== "manual" || manualEntryMode === "strategy") {
       return {
@@ -679,9 +621,7 @@ export default function App() {
         ? `User-specified execution price ${hasManualEntryInput ? formatPrice(parsedManualEntryInput) : "required"}.`
         : `Current 1m bar close ${formatPrice(current1mBar?.close)}.`;
   const activeEntryReferencePrice =
-    tradeState.currentPosition?.entryPrice ??
-    resolvedEntryConfig.entryPrice ??
-    analysis.entryPrice;
+    tradeState.currentPosition?.entryPrice ?? resolvedEntryConfig.entryPrice ?? analysis.entryPrice;
   const effectiveTargetLevels = analysis.targetLevels.map((level) => {
     const price =
       activeEntryReferencePrice === undefined
@@ -759,51 +699,29 @@ export default function App() {
     <div className="app-shell">
       <header>
         <h1>Stacey Reply Replay</h1>
-        <p>
-          Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.
-        </p>
+        <p>Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.</p>
       </header>
       <section className="upload-grid">
         <div className="upload-card">
           <h3>Replay dataset flow</h3>
           <p>{datasetImportMessage}</p>
-          <p className="upload-note">
-            Datasets are expected to arrive from the fixed `data/` preprocessing flow, then scan into pair/day selectors automatically.
-          </p>
+          <p className="upload-note">Datasets arrive from the fixed `data/` preprocessing flow, then lazily load pair index and single-event payloads.</p>
         </div>
       </section>
       <section className="control-grid">
-        <button
-          className={page === "replay" ? "active-toggle" : ""}
-          onClick={() => setPage("replay")}
-        >
-          Replay Page
-        </button>
-        <button
-          className={page === "debug" ? "active-toggle" : ""}
-          onClick={() => setPage("debug")}
-        >
-          Debug Page
-        </button>
+        <button className={page === "replay" ? "active-toggle" : ""} onClick={() => setPage("replay")}>Replay Page</button>
+        <button className={page === "debug" ? "active-toggle" : ""} onClick={() => setPage("debug")}>Debug Page</button>
         <label>
           Pair
-          <select
-            value={datasetId}
-            onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}
-          >
+          <select value={datasetId} onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}>
             {datasets.map((dataset) => (
-              <option key={dataset.id} value={dataset.id}>
-                {datasetLabelText(dataset)}
-              </option>
+              <option key={dataset.id} value={dataset.id}>{datasetLabelText(dataset)}</option>
             ))}
           </select>
         </label>
         <label>
           Candidate Day 3
-          <select
-            value={selectedTradeDayState?.selectedTradeDay ?? ""}
-            onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)}
-          >
+          <select value={selectedTradeDayState?.selectedTradeDay ?? ""} onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)}>
             {visibleCandidateTradeDays.length ? (
               visibleCandidateTradeDays.map((candidate) => (
                 <option key={candidate.date} value={candidate.date}>
@@ -817,23 +735,15 @@ export default function App() {
         </label>
         <label>
           Timeframe
-          <select
-            value={timeframe}
-            onChange={(e: { target: { value: string } }) => setTimeframe(e.target.value as Timeframe)}
-          >
+          <select value={timeframe} onChange={(e: { target: { value: string } }) => setTimeframe(e.target.value as Timeframe)}>
             {tfs.map((tf) => (
-              <option key={tf} value={tf}>
-                {tf}
-              </option>
+              <option key={tf} value={tf}>{tf}</option>
             ))}
           </select>
         </label>
         <label>
           Replay mode
-          <select
-            value={mode}
-            onChange={(e: { target: { value: string } }) => setMode(e.target.value as ReplayMode)}
-          >
+          <select value={mode} onChange={(e: { target: { value: string } }) => setMode(e.target.value as ReplayMode)}>
             <option value="pause">Pause</option>
             <option value="auto">Auto Replay</option>
             <option value="semi">Semi Replay</option>
@@ -841,84 +751,42 @@ export default function App() {
         </label>
         <label>
           Trade / practice mode
-          <select
-            value={tradeState.mode}
-            onChange={(e: { target: { value: string } }) =>
-              setReplyMode(e.target.value as ReplayPnLState["mode"])
-            }
-          >
+          <select value={tradeState.mode} onChange={(e: { target: { value: string } }) => setReplyMode(e.target.value as ReplayPnLState["mode"])}>
             <option value="auto">Auto Reply</option>
             <option value="manual">Manual Reply</option>
           </select>
         </label>
         <label>
           Candidate list filter
-          <select
-            value={practiceFilterEnabled ? "needs-practice" : "all"}
-            onChange={(e: { target: { value: string } }) =>
-              setPracticeFilterEnabled(e.target.value === "needs-practice")
-            }
-          >
+          <select value={practiceFilterEnabled ? "needs-practice" : "all"} onChange={(e: { target: { value: string } }) => setPracticeFilterEnabled(e.target.value === "needs-practice")}>
             <option value="all">Show all scanned days</option>
             <option value="needs-practice">Show needs-practice only</option>
           </select>
         </label>
         <label>
           Speed
-          <select
-            value={speed}
-            onChange={(e: { target: { value: string } }) => setSpeed(Number(e.target.value))}
-          >
+          <select value={speed} onChange={(e: { target: { value: string } }) => setSpeed(Number(e.target.value))}>
             {speedOptions.map((option) => (
-              <option key={option} value={option}>
-                {option} ms
-              </option>
+              <option key={option} value={option}>{option} ms</option>
             ))}
           </select>
         </label>
         <button onClick={resetReplay}>Reset</button>
-        <button onClick={playAuto}>Auto Replay</button>
-        <button onClick={playSemi}>Semi Replay</button>
+        <button onClick={() => setReplayBehavior("auto")}>Auto Replay</button>
+        <button onClick={() => setReplayBehavior("semi")}>Semi Replay</button>
         <button onClick={continueNextStep}>Continue / Next step</button>
       </section>
       <section className="control-grid">
-        <button
-          onClick={() => openManualTrade("long")}
-          disabled={manualTradeDisabled || manualSide === "short" || !entryGateOpen || !manualEntryPriceReady}
-        >
-          Enter Long
-        </button>
-        <button
-          onClick={() => openManualTrade("short")}
-          disabled={manualTradeDisabled || manualSide === "long" || !entryGateOpen || !manualEntryPriceReady}
-        >
-          Enter Short
-        </button>
-        <button
-          onClick={exitManualTrade}
-          disabled={tradeState.mode !== "manual" || !tradeState.currentPosition}
-        >
-          Exit
-        </button>
-        <button onClick={() => setTradeState((prev) => resetTradeState(prev.mode))}>
-          Reset Trade
-        </button>
+        <button onClick={() => openManualTrade("long")} disabled={manualTradeDisabled || manualSide === "short" || !entryGateOpen || !manualEntryPriceReady}>Enter Long</button>
+        <button onClick={() => openManualTrade("short")} disabled={manualTradeDisabled || manualSide === "long" || !entryGateOpen || !manualEntryPriceReady}>Enter Short</button>
+        <button onClick={exitManualTrade} disabled={tradeState.mode !== "manual" || !tradeState.currentPosition}>Exit</button>
+        <button onClick={() => setTradeState((prev) => resetTradeState(prev.mode))}>Reset Trade</button>
         <label>
           Manual entry basis
-          <select
-            value={manualEntryMode}
-            onChange={(e: { target: { value: string } }) =>
-              setManualEntryMode(e.target.value as ManualEntryMode)
-            }
-            disabled={tradeState.mode !== "manual" || tradeState.currentPosition !== null}
-          >
+          <select value={manualEntryMode} onChange={(e: { target: { value: string } }) => setManualEntryMode(e.target.value as ManualEntryMode)} disabled={tradeState.mode !== "manual" || tradeState.currentPosition !== null}>
             {manualEntryModeOptions.map((option) => (
               <option key={option} value={option}>
-                {option === "strategy"
-                  ? "Strategy entry"
-                  : option === "user"
-                    ? "User-specified price"
-                    : "Current bar close"}
+                {option === "strategy" ? "Strategy entry" : option === "user" ? "User-specified price" : "Current bar close"}
               </option>
             ))}
           </select>
@@ -926,13 +794,7 @@ export default function App() {
         {manualEntryMode === "user" ? (
           <label>
             Manual execution price
-            <input
-              type="number"
-              step="0.0001"
-              value={manualEntryInput}
-              onChange={(e: { target: { value: string } }) => setManualEntryInput(e.target.value)}
-              disabled={tradeState.mode !== "manual" || tradeState.currentPosition !== null}
-            />
+            <input type="number" step="0.0001" value={manualEntryInput} onChange={(e: { target: { value: string } }) => setManualEntryInput(e.target.value)} disabled={tradeState.mode !== "manual" || tradeState.currentPosition !== null} />
           </label>
         ) : null}
       </section>
@@ -948,18 +810,12 @@ export default function App() {
         <div>Trade / practice mode: {replyModeLabel(tradeState.mode)}</div>
         <div>Candidate list filter: {isPracticeMode ? "needs-practice only" : "all scanned days"}</div>
         <div>
-          Current position: {tradeState.currentPosition
-            ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)} (${entrySemanticsLabel(tradeState.currentPosition.entrySemantics)})`
-            : "Flat"}
+          Current position: {tradeState.currentPosition ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)} (${entrySemanticsLabel(tradeState.currentPosition.entrySemantics)})` : "Flat"}
         </div>
         <div>Last trade result: {formatTradeResult(tradeState.lastTrade)}</div>
         <div>Cumulative PnL: {formatPnL(tradeState.cumulativePnL)}</div>
-        <div>
-          Unlocked target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "none"}
-        </div>
-        <div>
-          Next target gate: {effectiveTargetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}
-        </div>
+        <div>Unlocked target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "none"}</div>
+        <div>Next target gate: {effectiveTargetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}</div>
       </section>
       {page === "replay" ? (
         <main className="main-grid">
@@ -990,7 +846,7 @@ export default function App() {
         <DebugPanel
           analysis={analysis}
           activeDataset={activeDataset}
-          candidateTradeDays={selectedTradeDayState?.availableTradeDays ?? []}
+          candidateTradeDays={availableTradeDays}
           tradeState={tradeState}
           entryGateOpen={entryGateOpen}
           pendingEntrySemantics={resolvedEntryConfig.entrySemantics}
@@ -1003,9 +859,7 @@ export default function App() {
           <h3>Detected candidate dates</h3>
           <ul>
             {visibleCandidateTradeDays.map((candidate) => (
-              <li key={candidate.date}>
-                {candidate.date} — {candidate.template} — {candidate.valid ? "valid" : "invalid"} — {candidate.summaryReason}
-              </li>
+              <li key={candidate.date}>{candidate.date} — {candidate.template} — {candidate.valid ? "valid" : "invalid"} — {candidate.summaryReason}</li>
             ))}
           </ul>
         </div>
@@ -1015,10 +869,7 @@ export default function App() {
           <h3>Target ladder</h3>
           <ul>
             {effectiveTargetLevels.map((level) => (
-              <li key={level.tier}>
-                TP{level.tier}: {level.status} @ {level.price.toFixed(4)} — {level.reason}
-                {level.missingGate ? ` Missing gate: ${level.missingGate}` : ""}
-              </li>
+              <li key={level.tier}>TP{level.tier}: {level.status} @ {level.price.toFixed(4)} — {level.reason}{level.missingGate ? ` Missing gate: ${level.missingGate}` : ""}</li>
             ))}
           </ul>
         </div>
@@ -1038,7 +889,8 @@ export default function App() {
         <div>
           <h3>Diagnostics</h3>
           <ul>
-            <li>Dataset file: {activeDataset.sourceLabel}</li>
+            <li>Pair index file: {selectedDataset?.indexPath}</li>
+            <li>Event file: {selectedCandidate?.datasetPath}</li>
             <li>Dataset source: {describeSourceType()}</li>
             <li>Bars loaded: {activeDataset.bars1m.length}</li>
             <li>Parse errors: {activeDataset.parseErrors.join(" | ") || "none"}</li>
@@ -1048,6 +900,7 @@ export default function App() {
             <li>Manual gate source: {analysis.lastReplyEval.explanation}</li>
             <li>Trade entry semantics in use: {entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? resolvedEntryConfig.entrySemantics)}</li>
             <li>Effective stop distance: {formatPrice(effectiveStopDistance)}</li>
+            <li>Event window: {activeDataset.metadata.eventWindow.startDate} → {activeDataset.metadata.eventWindow.endDate}</li>
           </ul>
         </div>
       </section>
