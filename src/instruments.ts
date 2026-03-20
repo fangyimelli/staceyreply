@@ -1,3 +1,4 @@
+import { OFFICIAL_PAIR_LOOKUP, buildOfficialInstrumentMeta } from "./officialPairs";
 import type { InstrumentMeta } from "./types/domain";
 
 const makeMeta = (meta: InstrumentMeta): InstrumentMeta => meta;
@@ -14,18 +15,6 @@ const INSTRUMENTS: Record<string, InstrumentMeta> = {
     preferredStopPips: 12,
     maxStopPips: 20,
     maxStopPoints: 20,
-  }),
-  xauusd: makeMeta({
-    pairKey: "xauusd",
-    symbol: "XAUUSD",
-    assetClass: "metal",
-    quotePrecision: 2,
-    tickSize: 0.01,
-    pipSize: 0.1,
-    pointSize: 0.01,
-    preferredStopPips: 15,
-    maxStopPips: 30,
-    maxStopPoints: 300,
   }),
 };
 
@@ -66,8 +55,9 @@ const inferFallbackMeta = (pairKey: string, symbol: string): InstrumentMeta =>
 
 export const resolveInstrumentMeta = (pairKeyOrId: string, symbol: string): InstrumentMeta => {
   const pairKey = normalizePairKey(pairKeyOrId);
-  return INSTRUMENTS[pairKey]
-    ?? inferFxMeta(pairKey, symbol)
+  return buildOfficialInstrumentMeta(pairKey)
+    ?? INSTRUMENTS[pairKey]
+    ?? inferFxMeta(pairKey, OFFICIAL_PAIR_LOOKUP[pairKey]?.displayName ?? symbol)
     ?? inferFallbackMeta(pairKey, normalizeSymbol(symbol) || symbol);
 };
 
