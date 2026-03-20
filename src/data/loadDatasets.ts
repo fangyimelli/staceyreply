@@ -1,5 +1,6 @@
 import { OFFICIAL_PAIR_KEYS } from '../officialPairs';
 import type {
+  DatasetFetchDiagnostics,
   DatasetLoadFailurePhase,
   DatasetManifestDiagnostics,
   DatasetManifestItem,
@@ -10,12 +11,39 @@ import type {
 
 const MANIFEST_URL = '/preprocessed/manifest.json';
 const normalizeAssetPath = (value: string) => value.replace(/^\/+/, '');
+const normalizeAssetUrl = (value: string) => `/${normalizeAssetPath(value)}`;
+const sanitizeFirstChars = (value: string) => value.replace(/\s+/g, ' ').slice(0, 80);
+const isHtmlDocument = (value: string) => {
+  const trimmed = value.trim().toLowerCase();
+  return trimmed.startsWith('<!doctype') || trimmed.startsWith('<html');
+};
+
+const buildPairIndexFileExistsDiagnostic = (
+  manifest: DatasetManifestItem,
+  manifestDiagnostics?: DatasetManifestDiagnostics,
+) => {
+  if (!manifestDiagnostics) return undefined;
+  if (manifestDiagnostics.missingPairFolders.includes(manifest.pairKey)) {
+    return false;
+  }
+  const skippedPairFolder = manifestDiagnostics.skippedPairFolders.find(
+    (entry) => entry.pairKey === manifest.pairKey,
+  );
+  if (skippedPairFolder) {
+    return false;
+  }
+  if (manifestDiagnostics.manifestPairKeys.includes(manifest.pairKey)) {
+    return true;
+  }
+  return undefined;
+};
 
 export class DatasetLoadError extends Error {
   datasetId: string;
   datasetLabel: string;
   sourceLabel: string;
   phase: DatasetLoadFailurePhase;
+  diagnostics?: DatasetFetchDiagnostics;
 
   constructor({
     datasetId,
@@ -23,12 +51,14 @@ export class DatasetLoadError extends Error {
     sourceLabel,
     phase,
     message,
+    diagnostics,
   }: {
     datasetId: string;
     datasetLabel: string;
     sourceLabel: string;
     phase: DatasetLoadFailurePhase;
     message: string;
+    diagnostics?: DatasetFetchDiagnostics;
   }) {
     super(message);
     this.name = 'DatasetLoadError';
@@ -36,6 +66,7 @@ export class DatasetLoadError extends Error {
     this.datasetLabel = datasetLabel;
     this.sourceLabel = sourceLabel;
     this.phase = phase;
+    this.diagnostics = diagnostics;
   }
 }
 
@@ -44,13 +75,27 @@ const loadJson = async <T,>({
   datasetId,
   datasetLabel,
   sourceLabel,
+  diagnostics,
 }: {
   url: string;
   datasetId: string;
   datasetLabel: string;
   sourceLabel: string;
+  diagnostics?: Partial<DatasetFetchDiagnostics>;
 }): Promise<T> => {
   const response = await fetch(url);
+  const responseStatus = response.status;
+  const contentType = response.headers.get('content-type') ?? undefined;
+  const text = await response.text();
+  const first80Chars = sanitizeFirstChars(text);
+  const fetchDiagnostics: DatasetFetchDiagnostics = {
+    ...diagnostics,
+    requestedUrl: url,
+    responseStatus,
+    contentType,
+    first80Chars,
+  };
+
   if (!response.ok) {
     throw new DatasetLoadError({
       datasetId,
@@ -58,11 +103,24 @@ const loadJson = async <T,>({
       sourceLabel,
       phase: 'file-read',
       message: `Unable to read preprocessed payload (${response.status}). Run npm run preprocess:data first.`,
+      diagnostics: fetchDiagnostics,
+    });
+  }
+
+  if (isHtmlDocument(text)) {
+    throw new DatasetLoadError({
+      datasetId,
+      datasetLabel,
+      sourceLabel,
+      phase: 'parse',
+      message:
+        'Expected JSON for pair index but received HTML. Likely missing static file or SPA rewrite fallback.',
+      diagnostics: fetchDiagnostics,
     });
   }
 
   try {
-    return (await response.json()) as T;
+    return JSON.parse(text) as T;
   } catch (error) {
     throw new DatasetLoadError({
       datasetId,
@@ -70,6 +128,7 @@ const loadJson = async <T,>({
       sourceLabel,
       phase: 'parse',
       message: error instanceof Error ? error.message : String(error),
+      diagnostics: fetchDiagnostics,
     });
   }
 };
@@ -127,17 +186,23 @@ export const getPreprocessedDatasetManifest = async (): Promise<DatasetManifestI
 
 export const loadPairCandidateIndex = async (
   manifest: DatasetManifestItem,
+  manifestDiagnostics?: DatasetManifestDiagnostics,
 ): Promise<PairCandidateIndex> => {
   const indexPath = normalizeAssetPath(manifest.indexPath);
+  const requestedPairIndexUrl = normalizeAssetUrl(indexPath);
   const pairIndex = await loadJson<PairCandidateIndex>({
-    url: `/${indexPath}`,
+    url: requestedPairIndexUrl,
     datasetId: manifest.id,
     datasetLabel: manifest.label,
     sourceLabel: indexPath,
+    diagnostics: {
+      fileExistsAtBuildTime: buildPairIndexFileExistsDiagnostic(manifest, manifestDiagnostics),
+    },
   });
   console.debug('[ReplayLoader] pair index fetched', {
     pairId: manifest.id,
-    indexPath,
+    requestedPairIndexUrl,
+    pairIndexFileExistsAtBuildTime: buildPairIndexFileExistsDiagnostic(manifest, manifestDiagnostics),
     candidateCount: pairIndex.candidates.length,
   });
   const invalidCandidate = pairIndex.candidates.find(
@@ -154,6 +219,10 @@ export const loadPairCandidateIndex = async (
       sourceLabel: indexPath,
       phase: 'parse',
       message: 'Pair index is malformed: candidates must include eventId, candidateDate, template, and datasetPath.',
+      diagnostics: {
+        requestedUrl: requestedPairIndexUrl,
+        fileExistsAtBuildTime: buildPairIndexFileExistsDiagnostic(manifest, manifestDiagnostics),
+      },
     });
   }
   return pairIndex;
@@ -164,12 +233,13 @@ export const loadReplayEventDataset = async (
   datasetPath: string,
 ): Promise<PreprocessedReplayEventDataset> => {
   const normalizedDatasetPath = normalizeAssetPath(datasetPath);
+  const requestedDatasetUrl = normalizeAssetUrl(normalizedDatasetPath);
   console.debug('[ReplayLoader] event payload fetch path', {
     pairId: manifest.id,
     datasetPath: normalizedDatasetPath,
   });
   const dataset = await loadJson<PreprocessedReplayEventDataset>({
-    url: `/${normalizedDatasetPath}`,
+    url: requestedDatasetUrl,
     datasetId: manifest.id,
     datasetLabel: manifest.label,
     sourceLabel: normalizedDatasetPath,
@@ -190,6 +260,9 @@ export const loadReplayEventDataset = async (
       sourceLabel: normalizedDatasetPath,
       phase: 'parse',
       message: 'Event payload missing or malformed: expected non-empty bars1m array.',
+      diagnostics: {
+        requestedUrl: requestedDatasetUrl,
+      },
     });
   }
   return dataset;

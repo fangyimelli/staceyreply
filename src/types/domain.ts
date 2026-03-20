@@ -164,12 +164,21 @@ export interface PreprocessedReplayEventDataset extends ParsedDataset {
 
 export type DatasetLoadFailurePhase = "file-read" | "parse" | "analysis-setup";
 
+export interface DatasetFetchDiagnostics {
+  requestedUrl?: string;
+  responseStatus?: number;
+  contentType?: string;
+  first80Chars?: string;
+  fileExistsAtBuildTime?: boolean;
+}
+
 export interface DatasetLoadErrorInfo {
   datasetId: string;
   datasetLabel: string;
   sourceLabel: string;
   phase: DatasetLoadFailurePhase;
   message: string;
+  diagnostics?: DatasetFetchDiagnostics;
 }
 
 export interface DatasetValidationIssue {
