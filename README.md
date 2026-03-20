@@ -5,7 +5,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 ## Confirmed features
 
 - 使用固定的 `data/` 原始資料契約：每個 pair 必須存放在 `data/pairs/<pair-slug>/raw/1m.csv`
-- 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars、輸出 manifest / pair index / 單一事件 replay dataset 產物
+- 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars，並為每個候選事件預先輸出 5m / 15m / 1h / 4h / 1D bars 到單一 event replay dataset 產物
 - app 啟動時只讀 `public/preprocessed/manifest.json`，選 pair 時只讀對應 `index.json`，選中候選事件後才讀單一 event dataset，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
 - `index.json` 僅保留候選事件摘要欄位：`eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`；完整 `bars` / annotations / trace 只存在單一 event dataset 檔案
 - parser 主責任為讀取 raw CSV 並正規化為 strategy 可用的標準 1m bars
@@ -14,7 +14,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 無 offset 的時間字串會依固定規則解析為 `America/New_York` wall-clock，再正規化成帶 offset 的可重現 strategy timestamp
 - 策略 session/day bucket 一律使用 `America/New_York`
 - 1m / 5m / 15m / 1h / 4h / 1D timeframe 切換
-- 高週期一律由 1m 原始資料聚合
+- 高週期以 1m 原始資料為唯一來源；預處理階段會先為每個候選事件寫入已預算的 5m / 15m / 1h / 4h / 1D bars，前端切換 timeframe 時優先讀取，缺資料時才回退到 runtime aggregation
 - pair-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
 - Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
 - replay dataset 會保留以前後各 2 天為目標的事件視窗；若資料不足則使用可得區間
@@ -68,7 +68,7 @@ npm run preprocess:data
 2. parser 讀取 raw CSV 並轉成標準 1m bars
 3. 寫出 `public/preprocessed/manifest.json`
 4. 針對每個 pair 寫出 `public/preprocessed/<pair-slug>/index.json`
-5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`
+5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
 6. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
 
 ## Pair switching
@@ -81,7 +81,7 @@ npm run preprocess:data
 ## Timeframe switching
 
 - `Timeframe` 可切換 1m / 5m / 15m / 1h / 4h / 1D
-- 高週期一律由 1m 原始資料聚合
+- 高週期以 1m 原始資料為唯一來源；預處理階段會先為每個候選事件寫入已預算的 5m / 15m / 1h / 4h / 1D bars，前端切換 timeframe 時優先讀取，缺資料時才回退到 runtime aggregation
 - 顯示與 session 邏輯使用 `America/New_York`
 - 若來源為 MT fixed EST，UI 會同時保留 source/raw time 供對照，並以 normalized strategy time 作為主要策略時間
 

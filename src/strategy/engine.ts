@@ -1,4 +1,4 @@
-import { aggregateBars } from "../aggregation/timeframe";
+import { aggregateBars, buildTimeframeBarMap, replayTimeframes } from "../aggregation/timeframe";
 import type {
   Annotation,
   CandidateTradeDay,
@@ -10,7 +10,7 @@ import type {
   ReplayStageId,
   ReplayVisibility,
   RuleTraceItem,
-  Timeframe,
+  TimeframeBarMap,
   TradeLevel,
 } from "../types/domain";
 import {
@@ -22,7 +22,6 @@ import {
 } from "../utils/nyDate";
 import { validateDataset } from "../validation/datasetValidation";
 
-const tfList: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const ema = (bars: OhlcvBar[], period: number) => {
   const k = 2 / (period + 1);
   let prev = bars[0]?.close ?? 0;
@@ -38,6 +37,30 @@ const inNySession = (bar: OhlcvBar) =>
 const id = (stage: ReplayStageId, suffix: string) => `${stage}-${suffix}`;
 const sliceBarsThroughTradeDay = (bars1m: OhlcvBar[], selectedTradeDay: string) =>
   bars1m.filter((bar) => strategyNyDate(strategyTime(bar)) <= selectedTradeDay);
+const sliceTimeframeBarMapThroughTradeDay = (
+  timeframeBars: Partial<TimeframeBarMap> | undefined,
+  selectedTradeDay: string,
+): Partial<TimeframeBarMap> =>
+  Object.fromEntries(
+    replayTimeframes.map((timeframe) => [
+      timeframe,
+      (timeframeBars?.[timeframe] ?? []).filter(
+        (bar) => strategyNyDate(strategyTime(bar)) <= selectedTradeDay,
+      ),
+    ]),
+  ) as Partial<TimeframeBarMap>;
+const buildReplayTimeframeBars = (
+  scopedBars1m: OhlcvBar[],
+  precomputedTimeframeBars?: Partial<TimeframeBarMap>,
+): TimeframeBarMap => {
+  const runtimeFallback = buildTimeframeBarMap(scopedBars1m);
+  return Object.fromEntries(
+    replayTimeframes.map((timeframe) => {
+      const precomputed = precomputedTimeframeBars?.[timeframe];
+      return [timeframe, Array.isArray(precomputed) && precomputed.length > 0 ? precomputed : runtimeFallback[timeframe]];
+    }),
+  ) as TimeframeBarMap;
+};
 const summarizeCandidate = (
   template: ReplayDatasetAnalysis["template"],
   invalidReasons: string[],
@@ -203,6 +226,7 @@ export const buildReplayDatasetAnalysis = (
   symbol: string,
   bars1m: OhlcvBar[],
   selectedTradeDay?: string,
+  precomputedTimeframeBars?: Partial<TimeframeBarMap>,
 ): ReplayDatasetAnalysis => {
   const groupedByDay = byNyDate(bars1m);
   const days = Object.keys(groupedByDay).sort();
@@ -210,9 +234,10 @@ export const buildReplayDatasetAnalysis = (
   const scopedBars = selectedTradeDay
     ? sliceBarsThroughTradeDay(bars1m, tradeDay)
     : bars1m;
-  const timeframeBars = Object.fromEntries(
-    tfList.map((tf) => [tf, aggregateBars(scopedBars, tf)]),
-  ) as Record<Timeframe, OhlcvBar[]>;
+  const scopedPrecomputedTimeframeBars = selectedTradeDay
+    ? sliceTimeframeBarMapThroughTradeDay(precomputedTimeframeBars, tradeDay)
+    : precomputedTimeframeBars;
+  const timeframeBars = buildReplayTimeframeBars(scopedBars, scopedPrecomputedTimeframeBars);
   const invalidIssues = validateDataset(scopedBars);
   const scopedGroupedByDay = byNyDate(scopedBars);
   const daily = timeframeBars["1D"];
@@ -1452,6 +1477,7 @@ export const scanCandidateTradeDays = (
       symbol,
       bars1m,
       tradeDay,
+      undefined,
     );
     return {
       date: tradeDay,

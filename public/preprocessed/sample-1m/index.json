@@ -2,6 +2,6 @@
   "pairId": "pair:sample-1m",
   "pairLabel": "SAMPLE-1M",
   "sourceLabel": "data/pairs/sample-1m/raw/1m.csv",
-  "datasetVersion": "v3",
+  "datasetVersion": "v4",
   "candidates": []
 }
