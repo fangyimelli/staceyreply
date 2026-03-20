@@ -61,3 +61,8 @@ declare module 'recharts' {
 interface ImportMeta {
   glob(pattern: string, options?: Record<string, unknown>): Record<string, unknown>;
 }
+
+declare module '*.csv?raw' {
+  const content: string;
+  export default content;
+}

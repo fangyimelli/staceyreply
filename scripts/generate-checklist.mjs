@@ -1,9 +1,9 @@
 import { writeFileSync } from 'node:fs';
 
 const implemented = [
-  'Load local CSV / JSON OHLCV from the fixed dist/mnt/data folder',
-  'Load a folder of symbol files via startup manifest scanning',
-  'Include a built-in sample dataset for immediate use',
+  'Load replay pairs from a local preprocessed manifest/index',
+  'Show only manifest-backed replay pairs in the top-level selector',
+  'Include built-in preprocessed replay pairs for immediate use',
   'Analyze and screen FRD / FGD candidate dates before selecting a trade day',
   'Show detected candidate dates explicitly in the UI',
   'In non-auto practice / manual-style review, only show `needs-practice` candidate dates',
@@ -17,14 +17,14 @@ const implemented = [
   'Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / strategy annotations',
   'Provide a right-side explain panel with rule-based reasoning, trace, and diagnostics',
   'Support replay controls: Pause / Auto Replay / Semi Replay / Continue / Reset',
-  'Support dataset selection followed by trade-day candidate selection from scanned dates',
+  'Support pair selection followed by trade-day candidate selection from scanned dates',
   'Maintain README',
-  'Maintain sample mode',
+  'Maintain preprocessed replay pair coverage',
   'Maintain an auto-generated acceptance checklist',
 ];
 
 const pending = [
-  'Upload a single file or folder from the UI',
+  'Expand the preprocessed pair library with more confirmed symbols',
   'Show date/time labels directly on the chart x-axis',
   'Support mouse-wheel zoom like TradingView',
   'Support drag/pan like TradingView',

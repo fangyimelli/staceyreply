@@ -48,7 +48,7 @@ export interface OhlcvBar {
   volume: number;
 }
 
-export type UserDatasetSource = "sample" | "single-file" | "folder-batch";
+export type UserDatasetSource = "preprocessed-manifest";
 
 export interface DatasetFile {
   id: string;
@@ -56,7 +56,6 @@ export interface DatasetFile {
   path: string;
   kind: "csv" | "json";
   raw: string;
-  isSample?: boolean;
   sourceType: UserDatasetSource;
 }
 
@@ -65,7 +64,6 @@ export interface DatasetManifestItem {
   label: string;
   path: string;
   kind: "csv" | "json";
-  isSample?: boolean;
   sourceType: UserDatasetSource;
 }
 
@@ -74,7 +72,6 @@ export interface ParsedDataset {
   symbol: string;
   bars1m: OhlcvBar[];
   sourceLabel: string;
-  isSample: boolean;
   parseStatus: "success" | "error";
   parseErrors: string[];
   parseDiagnostics: string[];
