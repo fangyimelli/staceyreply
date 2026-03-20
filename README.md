@@ -70,8 +70,9 @@ npm run preprocess:data
 3. 寫出 `public/preprocessed/manifest.json`，其中包含 official pair universe / manifest pair keys / missing official pairs / skipped pair folders diagnostics
 4. 針對每個 official pair 寫出 `public/preprocessed/<pair-slug>/index.json`
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
-6. 若缺任何 official pair，preprocessing 會報錯；app 也會顯示 missing official pair
-7. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
+6. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
+7. sample mode 若保留，必須維持獨立資料來源，不可混入 official manifest
+8. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
 
 ## Pair switching
 

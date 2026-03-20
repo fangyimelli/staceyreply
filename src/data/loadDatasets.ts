@@ -1,3 +1,4 @@
+import { OFFICIAL_PAIR_KEYS } from '../officialPairs';
 import type {
   DatasetLoadFailurePhase,
   DatasetManifestDiagnostics,
@@ -73,13 +74,50 @@ const loadJson = async <T,>({
   }
 };
 
-export const getPreprocessedDatasetManifest = async (): Promise<DatasetManifestItem[]> => {
+const validateOfficialManifest = (manifest: PreprocessedManifest): PreprocessedManifest => {
+  const diagnostics = manifest.diagnostics;
+  const manifestPairKeys = diagnostics?.manifestPairKeys ?? manifest.pairs.map((pair) => pair.pairKey);
+  const missingOfficialPairs = diagnostics?.missingOfficialPairs ?? OFFICIAL_PAIR_KEYS.filter((pairKey) => !manifestPairKeys.includes(pairKey));
+  const unexpectedPairs = manifestPairKeys.filter((pairKey) => !OFFICIAL_PAIR_KEYS.includes(pairKey));
+
+  if (missingOfficialPairs.length > 0) {
+    throw new DatasetLoadError({
+      datasetId: 'manifest',
+      datasetLabel: 'manifest',
+      sourceLabel: MANIFEST_URL,
+      phase: 'parse',
+      message: `Official manifest is incomplete. Missing official pair(s): ${missingOfficialPairs.join(', ')}.`,
+    });
+  }
+
+  if (unexpectedPairs.length > 0) {
+    throw new DatasetLoadError({
+      datasetId: 'manifest',
+      datasetLabel: 'manifest',
+      sourceLabel: MANIFEST_URL,
+      phase: 'parse',
+      message: `Official manifest contains non-official pair(s): ${unexpectedPairs.join(', ')}. Sample mode must stay separate from official replay mode.`,
+    });
+  }
+
+  return {
+    ...manifest,
+    pairs: manifest.pairs.filter((pair) => OFFICIAL_PAIR_KEYS.includes(pair.pairKey)),
+  };
+};
+
+const loadOfficialManifest = async (): Promise<PreprocessedManifest> => {
   const manifest = await loadJson<PreprocessedManifest>({
     url: MANIFEST_URL,
     datasetId: 'manifest',
     datasetLabel: 'manifest',
     sourceLabel: MANIFEST_URL,
   });
+  return validateOfficialManifest(manifest);
+};
+
+export const getPreprocessedDatasetManifest = async (): Promise<DatasetManifestItem[]> => {
+  const manifest = await loadOfficialManifest();
   console.debug('[ReplayLoader] manifest loaded', {
     path: MANIFEST_URL,
     pairCount: manifest.pairs.length,
@@ -157,13 +195,7 @@ export const loadReplayEventDataset = async (
   return dataset;
 };
 
-
 export const getManifestDiagnostics = async (): Promise<DatasetManifestDiagnostics | undefined> => {
-  const manifest = await loadJson<PreprocessedManifest>({
-    url: MANIFEST_URL,
-    datasetId: 'manifest',
-    datasetLabel: 'manifest',
-    sourceLabel: MANIFEST_URL,
-  });
+  const manifest = await loadOfficialManifest();
   return manifest.diagnostics;
 };
