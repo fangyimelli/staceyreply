@@ -153,6 +153,14 @@ export function ChartPanel({
   viewport,
   onViewportChange,
 }: Props) {
+  if (bars.length !== ema20.length) {
+    throw new Error(`ChartPanel received ${bars.length} bars but ${ema20.length} EMA values.`);
+  }
+  const invalidBar = bars.find((bar) => !bar.time || !Number.isFinite(bar.open) || !Number.isFinite(bar.high) || !Number.isFinite(bar.low) || !Number.isFinite(bar.close));
+  if (invalidBar) {
+    throw new Error(`ChartPanel received an invalid OHLC bar at ${invalidBar.time || 'unknown time'}.`);
+  }
+
   const chartRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
     startX: number;

@@ -1,10 +1,26 @@
 declare namespace JSX {
+  interface ElementClass {
+    render: any;
+  }
+
   interface IntrinsicElements {
     [elemName: string]: any;
   }
 }
 
 declare module 'react' {
+  export type ReactNode = any;
+  export interface ErrorInfo { componentStack: string; }
+  export class Component<P = any, S = any, SS = any> {
+    constructor(props: P);
+    props: P;
+    state: S;
+    context: any;
+    refs: any;
+    setState(state: Partial<S> | ((prevState: S, props: P) => Partial<S> | null) | null): void;
+    forceUpdate(): void;
+    render(): ReactNode;
+  }
   export const StrictMode: any;
   export function useEffect(effect: () => void | (() => void) | Promise<void>, deps?: unknown[]): void;
   export function useMemo<T>(factory: () => T, deps: unknown[]): T;

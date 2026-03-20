@@ -126,6 +126,14 @@ const normalizeTimeForStrategy = (time: string) => {
   return normalizeUnqualifiedNyText(time) ?? time;
 };
 
+export const parseExplicitTimestampMs = (time: string) => {
+  const ms = Date.parse(normalizeTimeForStrategy(time));
+  if (Number.isNaN(ms)) {
+    throw new Error(`Invalid timestamp: ${time}`);
+  }
+  return ms;
+};
+
 const parts = (time: string) => new Intl.DateTimeFormat('en-CA', {
   timeZone: NY_TIME_ZONE,
   year: 'numeric',
