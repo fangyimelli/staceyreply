@@ -59,8 +59,8 @@ export class AppErrorBoundary extends React.Component<Props, State> {
             <h2>What you can do</h2>
             <ul>
               <li>Reload the page to restart the current replay state.</li>
-              <li>Switch to a different dataset if this crash is tied to one file.</li>
-              <li>Use sample mode again if the current imported data looks malformed.</li>
+              <li>Switch to a different pair if this crash is tied to one replay dataset.</li>
+              <li>Use the sample case again if the current replay dataset looks malformed.</li>
             </ul>
             <div className="error-boundary-actions">
               <button type="button" onClick={this.reloadPage}>Reload page</button>

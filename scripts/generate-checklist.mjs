@@ -1,12 +1,12 @@
 import { writeFileSync } from 'node:fs';
 
 const implemented = [
-  'Load local CSV / JSON OHLCV from the fixed dist/mnt/data folder',
-  'Load a folder of symbol files via startup manifest scanning',
-  'Include a built-in sample dataset for immediate use',
-  'Analyze and screen FRD / FGD candidate dates before selecting a trade day',
-  'Show detected candidate dates explicitly in the UI',
-  'In non-auto practice / manual-style review, only show `needs-practice` candidate dates',
+  'Use fixed `data/` raw CSV as the only documented dataset entry flow',
+  'Preprocess raw CSV into structured replay datasets before UI selection',
+  'Auto-scan FRD / FGD candidate dates before selecting a trade day',
+  'Show detected candidate dates explicitly in the pair workflow',
+  'Use a replay event window centered on the selected trade day with up to 2 days before and 2 days after',
+  'Provide pair-only dataset selection UI copy',
   'Auto Reply = automatic entry / exit + cumulative PnL',
   'Manual Reply = manual entry / exit + cumulative PnL',
   'Support 1m / 5m / 15m / 1h / 4h / 1D',
@@ -17,14 +17,12 @@ const implemented = [
   'Overlay 20EMA / previous close / HOS / LOS / HOD / LOD / strategy annotations',
   'Provide a right-side explain panel with rule-based reasoning, trace, and diagnostics',
   'Support replay controls: Pause / Auto Replay / Semi Replay / Continue / Reset',
-  'Support dataset selection followed by trade-day candidate selection from scanned dates',
   'Maintain README',
-  'Maintain sample mode',
+  'Maintain sample mode documentation',
   'Maintain an auto-generated acceptance checklist',
 ];
 
 const pending = [
-  'Upload a single file or folder from the UI',
   'Show date/time labels directly on the chart x-axis',
   'Support mouse-wheel zoom like TradingView',
   'Support drag/pan like TradingView',
