@@ -5,9 +5,12 @@
   "type": "module",
   "description": "Vite SPA entry: index.html -> src/main.tsx -> src/App.tsx",
   "scripts": {
+    "predev": "npm run preprocess:data",
     "dev": "vite --host 127.0.0.1 --port 4173",
+    "prebuild": "npm run preprocess:data",
     "build": "npm run check && vite build",
     "check": "tsc -p tsconfig.app.json --noEmit",
+    "preprocess:data": "node scripts/preprocess-data.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "start": "npm run dev"
   },

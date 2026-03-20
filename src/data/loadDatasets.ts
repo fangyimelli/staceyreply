@@ -1,43 +1,10 @@
-import replayPairBarsJson from '../../sample/sample-1m.json';
-import replayPairWindowsCsv from '../../sample/frd_fgd_three_day_windows.csv?raw';
-import { parseDatasetFile } from '../parser/fileParser';
 import type {
-  DatasetFile,
   DatasetLoadFailurePhase,
   DatasetManifestItem,
   ParsedDataset,
 } from '../types/domain';
 
-const preprocessedDatasetFiles: DatasetFile[] = [
-  {
-    id: 'pair:sample-1m',
-    label: 'SAMPLE-1M',
-    path: 'sample/sample-1m.json',
-    kind: 'json',
-    raw: JSON.stringify(replayPairBarsJson),
-    sourceType: 'preprocessed-manifest',
-  },
-  {
-    id: 'pair:frd-fgd-three-day-windows',
-    label: 'FRD-FGD-THREE-DAY-WINDOWS',
-    path: 'sample/frd_fgd_three_day_windows.csv',
-    kind: 'csv',
-    raw: replayPairWindowsCsv,
-    sourceType: 'preprocessed-manifest',
-  },
-];
-
-const preprocessedDatasetManifest: DatasetManifestItem[] = preprocessedDatasetFiles.map((file) => ({
-  id: file.id,
-  label: file.label,
-  path: file.path,
-  kind: file.kind,
-  sourceType: file.sourceType,
-}));
-
-const preprocessedDatasetFilesById = new Map(
-  preprocessedDatasetFiles.map((file) => [file.id, file]),
-);
+const MANIFEST_URL = '/replay/manifest.json';
 
 export class DatasetLoadError extends Error {
   datasetId: string;
@@ -67,30 +34,42 @@ export class DatasetLoadError extends Error {
   }
 }
 
-export const getPreprocessedDatasetManifest = (): DatasetManifestItem[] =>
-  preprocessedDatasetManifest;
+export const getPreprocessedDatasetManifest = async (): Promise<DatasetManifestItem[]> => {
+  const response = await fetch(MANIFEST_URL);
+  if (!response.ok) {
+    throw new DatasetLoadError({
+      datasetId: 'manifest',
+      datasetLabel: 'manifest',
+      sourceLabel: MANIFEST_URL,
+      phase: 'file-read',
+      message: `Unable to read replay manifest (${response.status}). Run npm run preprocess:data first.`,
+    });
+  }
+
+  return response.json() as Promise<DatasetManifestItem[]>;
+};
 
 export const loadParsedDataset = async (
   manifest: DatasetManifestItem,
 ): Promise<ParsedDataset> => {
-  const datasetFile = preprocessedDatasetFilesById.get(manifest.id);
-  if (!datasetFile) {
+  const response = await fetch(`/${manifest.artifactPath}`);
+  if (!response.ok) {
     throw new DatasetLoadError({
       datasetId: manifest.id,
       datasetLabel: manifest.label,
-      sourceLabel: manifest.path,
+      sourceLabel: manifest.artifactPath,
       phase: 'file-read',
-      message: 'Preprocessed pair payload was missing from the local manifest index.',
+      message: `Preprocessed pair payload was missing (${response.status}). Run npm run preprocess:data first.`,
     });
   }
 
   try {
-    return parseDatasetFile(datasetFile);
+    return (await response.json()) as ParsedDataset;
   } catch (error) {
     throw new DatasetLoadError({
       datasetId: manifest.id,
       datasetLabel: manifest.label,
-      sourceLabel: datasetFile.path,
+      sourceLabel: manifest.artifactPath,
       phase: 'parse',
       message: error instanceof Error ? error.message : String(error),
     });
