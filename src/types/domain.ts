@@ -114,6 +114,7 @@ export interface PreprocessedReplayEventDataset extends ParsedDataset {
   pair: string;
   candidateDate: string;
   template: TemplateType;
+  bars?: OhlcvBar[];
   metadata: ReplayEventMetadata;
 }
 
@@ -340,6 +341,7 @@ export interface ReplayDatasetAnalysis {
 }
 
 export interface CandidateTradeDay {
+  eventId: string;
   date: string;
   template: TemplateType;
   practiceStatus: PracticeStatus;

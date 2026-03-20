@@ -249,6 +249,7 @@ const main = async () => {
         parseStatus: parsed.parseStatus,
         parseErrors: parsed.parseErrors,
         parseDiagnostics: parsed.parseDiagnostics,
+        bars: eventWindow.bars,
         bars1m: eventWindow.bars,
         precomputedTimeframeBars,
         eventId: candidate.eventId,

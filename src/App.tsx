@@ -21,7 +21,6 @@ import type {
   PreprocessedReplayEventDataset,
   ReplayMode,
   ReplayPnLState,
-  SelectedTradeDayState,
   Timeframe,
   TradeExecution,
   TradeEntrySemantics,
@@ -65,6 +64,7 @@ const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   return "analysis setup";
 };
 const toCandidateTradeDay = (candidate: PairCandidateSummary): CandidateTradeDay => ({
+  eventId: candidate.eventId,
   date: candidate.candidateDate,
   template: candidate.template,
   practiceStatus: candidate.practiceStatus,
@@ -77,7 +77,7 @@ export default function App() {
   const [datasetId, setDatasetId] = useState("");
   const [datasets, setDatasets] = useState<DatasetManifestItem[]>([]);
   const [pairIndex, setPairIndex] = useState<PairCandidateIndex | null>(null);
-  const [selectedTradeDay, setSelectedTradeDay] = useState("");
+  const [selectedEventId, setSelectedEventId] = useState("");
   const [activeDataset, setActiveDataset] = useState<PreprocessedReplayEventDataset | null>(null);
   const [datasetLoadError, setDatasetLoadError] = useState<DatasetLoadErrorInfo | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
@@ -102,6 +102,10 @@ export default function App() {
     getPreprocessedDatasetManifest()
       .then((manifest) => {
         if (cancelled) return;
+        console.debug("[ReplayLoader] manifest loaded", {
+          pairCount: manifest.length,
+          pairIds: manifest.map((item) => item.id),
+        });
         setDatasets(manifest);
         setDatasetId((current) => current || manifest[0]?.id || "");
         if (!manifest.length) {
@@ -156,16 +160,27 @@ export default function App() {
     if (!selectedDataset) return;
 
     let cancelled = false;
+    console.debug("[ReplayLoader] pair selected", {
+      pairId: selectedDataset.id,
+      label: selectedDataset.label,
+      indexPath: selectedDataset.indexPath,
+    });
     setIsDatasetLoading(true);
     setDatasetLoadError(null);
     setPairIndex(null);
     setActiveDataset(null);
-    setSelectedTradeDay("");
+    setSelectedEventId("");
     setMode("pause");
 
     loadPairCandidateIndex(selectedDataset)
       .then((index) => {
         if (cancelled) return;
+        console.debug("[ReplayLoader] pair index fetched", {
+          pairId: selectedDataset.id,
+          indexPath: selectedDataset.indexPath,
+          candidateCount: index.candidates.length,
+          eventIds: index.candidates.map((candidate) => candidate.eventId),
+        });
         setPairIndex(index);
         setIsDatasetLoading(false);
       })
@@ -209,27 +224,35 @@ export default function App() {
       : availableTradeDays;
   }, [availableTradeDays, isPracticeMode]);
 
-  const selectedTradeDayState = useMemo<SelectedTradeDayState | null>(() => {
-    if (!availableTradeDays.length) return null;
-    return {
-      selectedTradeDay,
-      availableTradeDays,
-    };
-  }, [availableTradeDays, selectedTradeDay]);
+  const selectedCandidate = useMemo(
+    () => pairIndex?.candidates.find((candidate) => candidate.eventId === selectedEventId) ?? null,
+    [pairIndex, selectedEventId],
+  );
 
   useEffect(() => {
-    if (!selectedTradeDay) {
+    console.debug("[ReplayLoader] candidate count", {
+      pairId: selectedDataset?.id ?? "none",
+      totalCandidates: pairIndex?.candidates.length ?? 0,
+      visibleCandidates: visibleCandidateTradeDays.length,
+      practiceFilterEnabled: isPracticeMode,
+    });
+  }, [isPracticeMode, pairIndex, selectedDataset?.id, visibleCandidateTradeDays.length]);
+
+  useEffect(() => {
+    if (!selectedEventId) {
       setActiveDataset(null);
       setMode("pause");
       setDatasetLoadError(null);
       return;
     }
 
-    if (!selectedDataset || !pairIndex) return;
-    const selectedCandidate = pairIndex.candidates.find(
-      (candidate) => candidate.candidateDate === selectedTradeDay,
-    );
-    if (!selectedCandidate) return;
+    if (!selectedDataset || !selectedCandidate) return;
+    console.debug("[ReplayLoader] candidate selected", {
+      pairId: selectedDataset.id,
+      eventId: selectedCandidate.eventId,
+      candidateDate: selectedCandidate.candidateDate,
+      datasetPath: selectedCandidate.datasetPath,
+    });
 
     let cancelled = false;
     setIsDatasetLoading(true);
@@ -241,6 +264,13 @@ export default function App() {
       .then((dataset) => {
         if (cancelled) return;
         try {
+          console.debug("[ReplayLoader] event payload parse result", {
+            eventId: dataset.eventId,
+            pair: dataset.pair,
+            candidateDate: dataset.candidateDate,
+            bars1m: dataset.bars1m.length,
+            parseStatus: dataset.parseStatus,
+          });
           void buildReplayDatasetAnalysis(
             dataset.datasetId,
             dataset.symbol,
@@ -248,6 +278,10 @@ export default function App() {
             dataset.candidateDate,
             dataset.precomputedTimeframeBars,
           );
+          console.debug("[ReplayLoader] bar count loaded", {
+            eventId: dataset.eventId,
+            bars1m: dataset.bars1m.length,
+          });
           setActiveDataset(dataset);
           setCurrentBarIndex(0);
           setTradeState((prev) => resetTradeState(prev.mode));
@@ -288,7 +322,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [pairIndex, selectedDataset, selectedTradeDay]);
+  }, [selectedCandidate, selectedDataset, selectedEventId]);
 
   const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
@@ -488,9 +522,23 @@ export default function App() {
     previousBarsLengthRef.current = bars.length;
   }, [bars]);
 
-  const selectedCandidate =
-    pairIndex?.candidates.find((candidate) => candidate.candidateDate === analysis?.selectedTradeDay) ??
+  const selectedAnalysisCandidate =
+    pairIndex?.candidates.find((candidate) => candidate.eventId === activeDataset?.eventId) ??
     pairIndex?.candidates[0];
+
+  const candidateDropdownDisabled =
+    isDatasetLoading || !pairIndex || visibleCandidateTradeDays.length === 0;
+  const selectedCandidateOption =
+    visibleCandidateTradeDays.find((candidate) => candidate.eventId === selectedEventId)?.eventId ?? "";
+  const infoStripMessage = (() => {
+    if (isDatasetLoading) return "Loading preprocessed data…";
+    if (datasetLoadError) return "Event payload missing or malformed";
+    if (!pairIndex) return "Waiting for pair index";
+    if (pairIndex.candidates.length === 0) return "No candidate events found for this pair";
+    if (!selectedCandidate) return `Pair index loaded: ${pairIndex.candidates.length} candidates found`;
+    if (!activeDataset) return `Candidate selected: ${selectedCandidate.eventId}`;
+    return "Event payload loaded successfully";
+  })();
 
   if (!activeDataset || !analysis) {
     return (
@@ -519,14 +567,32 @@ export default function App() {
           </label>
           <label>
             Candidate Day 3
-            <select value={selectedTradeDayState?.selectedTradeDay ?? ""} onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)} disabled>
-              <option value="">{pairIndex ? "Choose a candidate event to load" : "Wait for pair index to load"}</option>
+            <select
+              value={selectedCandidateOption}
+              onChange={(e: { target: { value: string } }) => setSelectedEventId(e.target.value)}
+              disabled={candidateDropdownDisabled}
+            >
+              <option value="">
+                {!pairIndex
+                  ? "Wait for pair index to load"
+                  : visibleCandidateTradeDays.length
+                    ? "Choose a candidate event to load"
+                    : "No candidate events available"}
+              </option>
+              {visibleCandidateTradeDays.map((candidate) => (
+                <option key={candidate.eventId} value={candidate.eventId}>
+                  {candidate.date} · {candidate.template} · {candidate.eventId}
+                </option>
+              ))}
             </select>
           </label>
         </section>
         <section className="info-strip">
-          <div>{isDatasetLoading ? "Loading preprocessed data…" : datasetLoadError ? "Pair loader failed." : pairIndex && !activeDataset ? "Pair index loaded. Choose a candidate event to fetch bars." : "Event payload loaded."}</div>
+          <div>{infoStripMessage}</div>
           <div>Dataset source: {selectedDataset ? describeSourceType() : "none"}</div>
+          {!isDatasetLoading && pairIndex?.candidates.length === 0 ? (
+            <div>No candidate events found for this pair. Rerun preprocessing or inspect {selectedDataset?.indexPath}.</div>
+          ) : null}
           {!isDatasetLoading && datasetLoadError ? (
             <div>Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}</div>
           ) : null}
@@ -710,12 +776,16 @@ export default function App() {
         </label>
         <label>
           Candidate Day 3
-          <select value={selectedTradeDayState?.selectedTradeDay ?? ""} onChange={(e: { target: { value: string } }) => setSelectedTradeDay(e.target.value)}>
+          <select
+            value={selectedCandidateOption}
+            onChange={(e: { target: { value: string } }) => setSelectedEventId(e.target.value)}
+            disabled={candidateDropdownDisabled}
+          >
             <option value="">Choose candidate event</option>
             {visibleCandidateTradeDays.length ? (
               visibleCandidateTradeDays.map((candidate) => (
-                <option key={candidate.date} value={candidate.date}>
-                  {candidate.date} · {candidate.template} · {candidate.valid ? "valid" : "invalid"} · {candidate.shortSummary}
+                <option key={candidate.eventId} value={candidate.eventId}>
+                  {candidate.date} · {candidate.template} · {candidate.valid ? "valid" : "invalid"} · {candidate.eventId}
                 </option>
               ))
             ) : (
@@ -793,7 +863,7 @@ export default function App() {
         <div>Dataset source: {describeSourceType()}</div>
         <div>Parse status: {activeDataset.parseStatus}</div>
         <div>Trade day: {analysis.selectedTradeDay}</div>
-        <div>Candidate summary: {selectedCandidate?.shortSummary ?? "none"}</div>
+        <div>Candidate summary: {selectedAnalysisCandidate?.shortSummary ?? "none"}</div>
         <div>Current stage: {analysis.stage}</div>
         <div>Can reply now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}</div>
         <div>Current gate: {analysis.lastReplyEval.explanation}</div>
@@ -850,7 +920,7 @@ export default function App() {
           <h3>Detected candidate dates</h3>
           <ul>
             {visibleCandidateTradeDays.map((candidate) => (
-              <li key={candidate.date}>{candidate.date} — {candidate.template} — {candidate.valid ? "valid" : "invalid"} — {candidate.shortSummary}</li>
+              <li key={candidate.eventId}>{candidate.date} — {candidate.template} — {candidate.valid ? "valid" : "invalid"} — {candidate.eventId}</li>
             ))}
           </ul>
         </div>
@@ -881,7 +951,7 @@ export default function App() {
           <h3>Diagnostics</h3>
           <ul>
             <li>Pair index file: {selectedDataset?.indexPath}</li>
-            <li>Event file: {selectedCandidate?.datasetPath}</li>
+            <li>Event file: {selectedAnalysisCandidate?.datasetPath}</li>
             <li>Dataset source: {describeSourceType()}</li>
             <li>Bars loaded: {activeDataset.bars1m.length}</li>
             <li>Parse errors: {activeDataset.parseErrors.join(" | ") || "none"}</li>
