@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DatasetLoadError,
+  getManifestDiagnostics,
   getPreprocessedDatasetManifest,
   loadPairCandidateIndex,
   loadReplayEventDataset,
@@ -12,9 +13,11 @@ import {
   createReplayPnLState,
   createTradeExecution,
 } from "./strategy/pnl";
+import { priceDistanceInPips, targetPriceFromPips } from "./instruments";
 import type {
   CandidateTradeDay,
   DatasetLoadErrorInfo,
+  DatasetManifestDiagnostics,
   DatasetManifestItem,
   PairCandidateIndex,
   PairCandidateSummary,
@@ -76,6 +79,7 @@ export default function App() {
   const [page, setPage] = useState<"replay" | "debug">("replay");
   const [datasetId, setDatasetId] = useState("");
   const [datasets, setDatasets] = useState<DatasetManifestItem[]>([]);
+  const [manifestDiagnostics, setManifestDiagnostics] = useState<DatasetManifestDiagnostics | null>(null);
   const [pairIndex, setPairIndex] = useState<PairCandidateIndex | null>(null);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [activeDataset, setActiveDataset] = useState<PreprocessedReplayEventDataset | null>(null);
@@ -99,14 +103,15 @@ export default function App() {
     setIsDatasetLoading(true);
     setDatasetLoadError(null);
 
-    getPreprocessedDatasetManifest()
-      .then((manifest) => {
+    Promise.all([getPreprocessedDatasetManifest(), getManifestDiagnostics()])
+      .then(([manifest, diagnostics]) => {
         if (cancelled) return;
         console.debug("[ReplayLoader] manifest loaded", {
           pairCount: manifest.length,
           pairIds: manifest.map((item) => item.id),
         });
         setDatasets(manifest);
+        setManifestDiagnostics(diagnostics ?? null);
         setDatasetId((current) => current || manifest[0]?.id || "");
         if (!manifest.length) {
           setDatasetLoadError({
@@ -123,6 +128,7 @@ export default function App() {
       .catch((error) => {
         if (cancelled) return;
         setDatasets([]);
+        setManifestDiagnostics(null);
         const loadError =
           error instanceof DatasetLoadError
             ? {
@@ -338,8 +344,17 @@ export default function App() {
 
   const analysis = useMemo(() => {
     if (!datasetAnalysis) return null;
-    return buildReplayAnalysis(datasetAnalysis, currentBarIndex);
-  }, [datasetAnalysis, currentBarIndex]);
+    return {
+      ...buildReplayAnalysis(datasetAnalysis, currentBarIndex),
+      pairDiagnostics: {
+        manifestPairCount: manifestDiagnostics?.manifestPairCount ?? datasets.length,
+        visiblePairCount: datasets.length,
+        selectedPairKey: selectedDataset?.pairKey ?? datasetAnalysis.instrument.pairKey,
+        missingPairFolders: manifestDiagnostics?.missingPairFolders ?? [],
+        skippedPairFolders: manifestDiagnostics?.skippedPairFolders ?? [],
+      },
+    };
+  }, [datasetAnalysis, currentBarIndex, datasets.length, manifestDiagnostics, selectedDataset?.pairKey]);
 
   useEffect(() => {
     if (!analysis || !activeDataset) return;
@@ -413,7 +428,7 @@ export default function App() {
       );
       let nextState = prev;
 
-      if (!prev.currentPosition && entryUnlocked && analysis.entryPrice !== undefined) {
+      if (!prev.currentPosition && entryUnlocked && analysis.confirmedEntryPrice !== undefined) {
         tradeIdRef.current += 1;
         nextState = {
           ...prev,
@@ -421,8 +436,8 @@ export default function App() {
             id: `auto-${tradeIdRef.current}`,
             mode: "auto",
             side,
-            entryPrice: analysis.entryPrice,
-            strategyEntryPrice: analysis.entryPrice,
+            entryPrice: analysis.confirmedEntryPrice,
+            strategyEntryPrice: analysis.confirmedEntryPrice,
             entrySemantics: "strategy-entry",
             entryBarIndex: currentBarIndex,
             entryTime: bar.time,
@@ -641,8 +656,8 @@ export default function App() {
   const resolvedEntryConfig = (() => {
     if (tradeState.mode !== "manual" || manualEntryMode === "strategy") {
       return {
-        entryPrice: analysis.entryPrice,
-        strategyEntryPrice: analysis.entryPrice,
+        entryPrice: analysis.confirmedEntryPrice,
+        strategyEntryPrice: analysis.confirmedEntryPrice,
         entrySemantics: "strategy-entry" as const,
       };
     }
@@ -650,20 +665,20 @@ export default function App() {
       return hasManualEntryInput
         ? {
             entryPrice: parsedManualEntryInput,
-            strategyEntryPrice: analysis.entryPrice,
+            strategyEntryPrice: analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice,
             manualExecutionPrice: parsedManualEntryInput,
             entrySemantics: "manual-execution-user" as const,
           }
         : {
             entryPrice: undefined,
-            strategyEntryPrice: analysis.entryPrice,
+            strategyEntryPrice: analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice,
             manualExecutionPrice: undefined,
             entrySemantics: "manual-execution-user" as const,
           };
     }
     return {
       entryPrice: current1mBar?.close,
-      strategyEntryPrice: analysis.entryPrice,
+      strategyEntryPrice: analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice,
       manualExecutionPrice: current1mBar?.close,
       entrySemantics: "manual-execution-close" as const,
     };
@@ -671,20 +686,22 @@ export default function App() {
   const manualEntryPriceReady = resolvedEntryConfig.entryPrice !== undefined;
   const manualEntryConfigSummary =
     manualEntryMode === "strategy"
-      ? `Strategy-confirmed entry ${formatPrice(analysis.entryPrice)}.`
+      ? analysis.confirmedEntryPrice !== undefined
+        ? `Strategy-confirmed entry ${formatPrice(analysis.confirmedEntryPrice)}.`
+        : `Candidate entry only ${formatPrice(analysis.candidateEntryPrice)} — blocked until hard gates pass.`
       : manualEntryMode === "user"
         ? `User-specified execution price ${hasManualEntryInput ? formatPrice(parsedManualEntryInput) : "required"}.`
         : `Current 1m bar close ${formatPrice(current1mBar?.close)}.`;
   const activeEntryReferencePrice =
-    tradeState.currentPosition?.entryPrice ?? resolvedEntryConfig.entryPrice ?? analysis.entryPrice;
+    tradeState.currentPosition?.entryPrice ?? resolvedEntryConfig.entryPrice ?? analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice;
   const effectiveTargetLevels = analysis.targetLevels.map((level) => {
     const price =
       activeEntryReferencePrice === undefined
         ? level.price
         : manualSide === "long"
-          ? activeEntryReferencePrice + level.tier * 0.0001
+          ? targetPriceFromPips(activeEntryReferencePrice, level.tier, analysis.instrument, "long")
           : manualSide === "short"
-            ? activeEntryReferencePrice - level.tier * 0.0001
+            ? targetPriceFromPips(activeEntryReferencePrice, level.tier, analysis.instrument, "short")
             : level.price;
     const hit =
       level.eligible && current1mBar
@@ -698,13 +715,19 @@ export default function App() {
       ...level,
       price,
       hit,
-      status: hit ? "hit" : level.status === "pending" ? "pending" : level.eligible ? "eligible" : "blocked",
+      status: hit ? "hit" : level.status === "pending" ? "pending" : level.eligible ? "eligible" : level.status,
     };
   });
   const effectiveStopDistance =
     analysis.stopPrice !== undefined && activeEntryReferencePrice !== undefined
       ? Math.abs(activeEntryReferencePrice - analysis.stopPrice)
       : undefined;
+  const effectiveStopDistancePips =
+    analysis.stopPrice !== undefined && activeEntryReferencePrice !== undefined
+      ? priceDistanceInPips(Math.abs(activeEntryReferencePrice - analysis.stopPrice), analysis.instrument)
+      : undefined;
+  const visiblePairCount = datasets.length;
+  const selectedPairKey = selectedDataset?.pairKey ?? "none";
 
   const openManualTrade = (side: TradeSide) => {
     const bar = currentReplayBar;
@@ -875,6 +898,9 @@ export default function App() {
         <div>Last trade result: {formatTradeResult(tradeState.lastTrade)}</div>
         <div>Cumulative PnL: {formatPnL(tradeState.cumulativePnL)}</div>
         <div>Unlocked target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "none"}</div>
+        <div>Manifest pair count: {manifestDiagnostics?.manifestPairCount ?? datasets.length}</div>
+        <div>Visible pair count in UI: {visiblePairCount}</div>
+        <div>Selected pair key: {selectedPairKey}</div>
         <div>Next target gate: {effectiveTargetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}</div>
       </section>
       {page === "replay" ? (
@@ -912,7 +938,7 @@ export default function App() {
           entryGateOpen={entryGateOpen}
           pendingEntrySemantics={resolvedEntryConfig.entrySemantics}
           pendingEntryPrice={resolvedEntryConfig.entryPrice}
-          effectiveStopDistance={effectiveStopDistance}
+          effectiveStopDistance={effectiveStopDistancePips}
         />
       )}
       <section className="footer-grid">
@@ -941,7 +967,8 @@ export default function App() {
             <li>Closed trades: {tradeState.trades.length}</li>
             <li>Last result: {formatTradeResult(tradeState.lastTrade)}</li>
             <li>Cumulative PnL: {formatPnL(tradeState.cumulativePnL)}</li>
-            <li>Strategy entry: {formatPrice(tradeState.currentPosition?.strategyEntryPrice ?? analysis.entryPrice)}</li>
+            <li>Candidate entry: {formatPrice(analysis.candidateEntryPrice)}</li>
+            <li>Confirmed entry: {formatPrice(tradeState.currentPosition?.strategyEntryPrice ?? analysis.confirmedEntryPrice)}</li>
             <li>Manual execution price: {formatPrice(tradeState.currentPosition?.manualExecutionPrice)}</li>
             <li>Trade PnL entry basis: {formatPrice(tradeState.currentPosition?.entryPrice ?? resolvedEntryConfig.entryPrice)}</li>
             <li>Entry semantics: {entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? resolvedEntryConfig.entrySemantics)}</li>
@@ -961,6 +988,13 @@ export default function App() {
             <li>Manual gate source: {analysis.lastReplyEval.explanation}</li>
             <li>Trade entry semantics in use: {entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? resolvedEntryConfig.entrySemantics)}</li>
             <li>Effective stop distance: {formatPrice(effectiveStopDistance)}</li>
+            <li>Effective stop distance (pips/units): {effectiveStopDistancePips ?? "n/a"}</li>
+            <li>Instrument pip size / point size: {analysis.instrument.pipSize} / {analysis.instrument.pointSize}</li>
+            <li>Manifest pair count: {manifestDiagnostics?.manifestPairCount ?? datasets.length}</li>
+            <li>Visible pair count in UI: {visiblePairCount}</li>
+            <li>Selected pair key: {selectedPairKey}</li>
+            <li>Missing pair folders: {manifestDiagnostics?.missingPairFolders.join(" | ") || "none"}</li>
+            <li>Skipped pair folders: {manifestDiagnostics?.skippedPairFolders.map((item) => `${item.pairKey}: ${item.reason}`).join(" | ") || "none"}</li>
             <li>Event window: {activeDataset.metadata.eventWindow.startDate} → {activeDataset.metadata.eventWindow.endDate}</li>
           </ul>
         </div>

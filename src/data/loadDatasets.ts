@@ -1,5 +1,6 @@
 import type {
   DatasetLoadFailurePhase,
+  DatasetManifestDiagnostics,
   DatasetManifestItem,
   PairCandidateIndex,
   PreprocessedManifest,
@@ -154,4 +155,15 @@ export const loadReplayEventDataset = async (
     });
   }
   return dataset;
+};
+
+
+export const getManifestDiagnostics = async (): Promise<DatasetManifestDiagnostics | undefined> => {
+  const manifest = await loadJson<PreprocessedManifest>({
+    url: MANIFEST_URL,
+    datasetId: 'manifest',
+    datasetLabel: 'manifest',
+    sourceLabel: MANIFEST_URL,
+  });
+  return manifest.diagnostics;
 };
