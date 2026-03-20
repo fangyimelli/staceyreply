@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DatasetLoadError,
-  createUserDatasetManifest,
-  fileToDatasetFile,
   getBuiltinSampleManifest,
   loadParsedDataset,
 } from "./data/loadDatasets";
@@ -30,7 +28,6 @@ import type {
   TradeExecution,
   TradeEntrySemantics,
   TradeSide,
-  UserDatasetSource,
 } from "./types/domain";
 import { ChartPanel } from "./ui/ChartPanel";
 import { ExplainPanel } from "./ui/ExplainPanel";
@@ -61,11 +58,7 @@ const formatTradeResult = (trade: TradeExecution | null) => {
   return `${label} ${trade.side.toUpperCase()} ${formatPnL(trade.realizedPnL)}${exitReason}`;
 };
 const resetTradeState = (mode: ReplayPnLState["mode"]) => createReplayPnLState(mode);
-const describeSourceType = (sourceType: UserDatasetSource) => {
-  if (sourceType === "sample") return "Built-in sample";
-  if (sourceType === "single-file") return "User single file";
-  return "User folder batch";
-};
+const describeSourceType = () => "Structured replay dataset";
 const datasetLabelText = (dataset: DatasetManifestItem) =>
   `${dataset.label.replace(/\.(csv|json)$/i, "").toUpperCase()}${
     dataset.isSample ? " (sample mode)" : ""
@@ -77,22 +70,14 @@ const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   return "analysis setup";
 };
 
-const folderPickerProps = {
-  multiple: true,
-  webkitdirectory: "",
-  directory: "",
-} as const as Record<string, string | boolean>;
-
 export default function App() {
   const [page, setPage] = useState<"replay" | "debug">("replay");
-  const [userDatasetFiles, setUserDatasetFiles] = useState<DatasetFile[]>([]);
-  const [datasetId, setDatasetId] = useState(builtinSampleManifest[0]?.id ?? "");
+    const [datasetId, setDatasetId] = useState(builtinSampleManifest[0]?.id ?? "");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
   const [datasetLoadError, setDatasetLoadError] = useState<DatasetLoadErrorInfo | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
-  const [isImportingDatasets, setIsImportingDatasets] = useState(false);
-  const [datasetImportMessage, setDatasetImportMessage] = useState(
-    "Built-in sample mode ready. You can also load local CSV/JSON data.",
+    const [datasetImportMessage] = useState(
+    "Replay datasets load from the fixed data pipeline. Select a pair after startup scan completes.",
   );
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
   const [mode, setMode] = useState<ReplayMode>("pause");
@@ -110,11 +95,8 @@ export default function App() {
   const previousBarsLengthRef = useRef(0);
   const semiPendingStopRef = useRef<number | null>(null);
 
-  const datasets = useMemo(
-    () => [...builtinSampleManifest, ...createUserDatasetManifest(userDatasetFiles)],
-    [userDatasetFiles],
-  );
-  const datasetFilesById = useMemo(() => toDatasetMap(userDatasetFiles), [userDatasetFiles]);
+  const datasets = useMemo(() => [...builtinSampleManifest], []);
+  const datasetFilesById = useMemo(() => toDatasetMap([]), []);
 
   useEffect(() => {
     if (!datasets.some((item) => item.id === datasetId)) {
@@ -191,37 +173,6 @@ export default function App() {
       cancelled = true;
     };
   }, [datasetFilesById, datasets, datasetId]);
-
-  const importDatasets = async (
-    files: FileList | File[],
-    sourceType: Exclude<UserDatasetSource, "sample">,
-  ) => {
-    const selectedFiles = Array.from(files);
-    setIsImportingDatasets(true);
-
-    try {
-      const imported = (
-        await Promise.all(selectedFiles.map((file) => fileToDatasetFile(file, sourceType)))
-      ).filter((file): file is DatasetFile => file !== null);
-
-      setUserDatasetFiles(imported);
-
-      if (imported.length > 0) {
-        setDatasetId(imported[0].id);
-        setDatasetImportMessage(
-          `${describeSourceType(sourceType)} loaded: ${imported.length} dataset${
-            imported.length === 1 ? "" : "s"
-          } scanned for Candidate Day 3 dates.`,
-        );
-      } else {
-        setDatasetImportMessage(
-          `No supported CSV/JSON files were found in the ${sourceType === "single-file" ? "selected file" : "selected folder"}.`,
-        );
-      }
-    } finally {
-      setIsImportingDatasets(false);
-    }
-  };
 
   const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
@@ -504,44 +455,16 @@ export default function App() {
         <header>
           <h1>Stacey Reply Replay</h1>
           <p>
-            Built-in sample mode plus local single-file or folder-batch CSV/JSON loading. No broker API.
+            Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.
           </p>
         </header>
         <section className="upload-grid">
           <div className="upload-card">
-            <h3>Data source</h3>
+            <h3>Replay dataset flow</h3>
             <p>{datasetImportMessage}</p>
-            <div className="upload-actions">
-              <label>
-                Single file
-                <input
-                  type="file"
-                  accept=".csv,.json"
-                  onChange={(e: any) => {
-                    const files = e.target.files;
-                    if (files?.length) {
-                      void importDatasets(files, "single-file");
-                      e.target.value = "";
-                    }
-                  }}
-                />
-              </label>
-              <label>
-                Folder batch
-                <input
-                  type="file"
-                  accept=".csv,.json"
-                  {...folderPickerProps}
-                  onChange={(e: any) => {
-                    const files = e.target.files;
-                    if (files?.length) {
-                      void importDatasets(files, "folder-batch");
-                      e.target.value = "";
-                    }
-                  }}
-                />
-              </label>
-            </div>
+            <p className="upload-note">
+              Fixed `data/` raw CSV → preprocessing → pair selection → automatic replay dataset load.
+            </p>
           </div>
         </section>
         <section className="control-grid">
@@ -558,7 +481,7 @@ export default function App() {
           Debug Page
         </button>
           <label>
-            Dataset
+            Pair
             <select
               value={datasetId}
               onChange={(e: { target: { value: string } }) =>
@@ -584,22 +507,22 @@ export default function App() {
               <option value="">
                 {activeDataset?.parseStatus === "error"
                   ? "Dataset scan unavailable"
-                  : "Load and scan a dataset first"}
+                  : "Wait for pair scan to complete"}
               </option>
             </select>
           </label>
         </section>
         <section className="info-strip">
           <div>
-            {isDatasetLoading || isImportingDatasets
+            {isDatasetLoading
               ? "Loading dataset…"
               : datasetLoadError
                 ? "Dataset loader failed."
               : activeDataset?.parseStatus === "error"
                 ? "Dataset parse failed."
-                : "Dataset scan pending or unavailable."}
+                : "Pair scan pending or unavailable."}
           </div>
-          <div>Dataset source: {selectedDataset ? describeSourceType(selectedDataset.sourceType) : "none"}</div>
+          <div>Dataset source: {selectedDataset ? describeSourceType() : "none"}</div>
           {!isDatasetLoading && datasetLoadError ? (
             <div>
               Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}
@@ -619,7 +542,7 @@ export default function App() {
                 <li>Dataset: {datasetLoadError.datasetLabel}</li>
                 <li>Dataset id: {datasetLoadError.datasetId}</li>
                 <li>Dataset file: {datasetLoadError.sourceLabel}</li>
-                <li>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</li>
+                <li>Dataset source: {describeSourceType()}</li>
                 <li>Load failure phase: {loaderPhaseLabel(datasetLoadError.phase)}</li>
                 <li>Loader/runtime message: {datasetLoadError.message}</li>
               </ul>
@@ -633,7 +556,7 @@ export default function App() {
               <ul>
                 <li>Dataset: {selectedDatasetLabel}</li>
                 <li>Dataset file: {activeDataset.sourceLabel}</li>
-                <li>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</li>
+                <li>Dataset source: {describeSourceType()}</li>
                 <li>Parse status: {activeDataset.parseStatus}</li>
                 <li>Failure reasons: {activeDataset.parseErrors.join(" | ")}</li>
                 <li>
@@ -799,46 +722,15 @@ export default function App() {
       <header>
         <h1>Stacey Reply Replay</h1>
         <p>
-          Built-in sample mode plus local single-file or folder-batch CSV/JSON loading. No broker API.
+          Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.
         </p>
       </header>
       <section className="upload-grid">
         <div className="upload-card">
-          <h3>Choose local data</h3>
+          <h3>Replay dataset flow</h3>
           <p>{datasetImportMessage}</p>
-          <div className="upload-actions">
-            <label>
-              Single file
-              <input
-                type="file"
-                accept=".csv,.json"
-                onChange={(e: any) => {
-                  const files = e.target.files;
-                  if (files?.length) {
-                    void importDatasets(files, "single-file");
-                    e.target.value = "";
-                  }
-                }}
-              />
-            </label>
-            <label>
-              Folder batch
-              <input
-                type="file"
-                accept=".csv,.json"
-                {...folderPickerProps}
-                onChange={(e: any) => {
-                  const files = e.target.files;
-                  if (files?.length) {
-                    void importDatasets(files, "folder-batch");
-                    e.target.value = "";
-                  }
-                }}
-              />
-            </label>
-          </div>
           <p className="upload-note">
-            After loading, the app scans the dataset first and then refreshes Candidate Day 3 options.
+            Datasets are expected to arrive from the fixed `data/` preprocessing flow, then scan into pair/day selectors automatically.
           </p>
         </div>
       </section>
@@ -856,7 +748,7 @@ export default function App() {
           Debug Page
         </button>
         <label>
-          Dataset
+          Pair
           <select
             value={datasetId}
             onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}
@@ -881,7 +773,7 @@ export default function App() {
                 </option>
               ))
             ) : (
-              <option value="">No scanned candidates for current dataset</option>
+              <option value="">No scanned candidates for current pair</option>
             )}
           </select>
         </label>
@@ -1007,8 +899,8 @@ export default function App() {
         ) : null}
       </section>
       <section className="info-strip">
-        <div>Dataset status: {isDatasetLoading || isImportingDatasets ? "loading" : "ready"}</div>
-        <div>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</div>
+        <div>Dataset status: {isDatasetLoading ? "loading" : "ready"}</div>
+        <div>Dataset source: {describeSourceType()}</div>
         <div>Parse status: {activeDataset.parseStatus}</div>
         <div>Trade day: {analysis.selectedTradeDay}</div>
         <div>Candidate summary: {selectedCandidate?.summaryReason ?? "none"}</div>
@@ -1109,7 +1001,7 @@ export default function App() {
           <h3>Diagnostics</h3>
           <ul>
             <li>Dataset file: {activeDataset.sourceLabel}</li>
-            <li>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</li>
+            <li>Dataset source: {describeSourceType()}</li>
             <li>Bars loaded: {activeDataset.bars1m.length}</li>
             <li>Parse errors: {activeDataset.parseErrors.join(" | ") || "none"}</li>
             <li>Accepted formats / notes: {activeDataset.parseDiagnostics.join(" | ") || "none"}</li>
