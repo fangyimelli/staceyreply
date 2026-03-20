@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  DatasetLoadError,
   createUserDatasetManifest,
   fileToDatasetFile,
   getBuiltinSampleManifest,
@@ -19,6 +20,7 @@ import {
 import type {
   CandidateTradeDay,
   DatasetFile,
+  DatasetLoadErrorInfo,
   DatasetManifestItem,
   ParsedDataset,
   ReplayMode,
@@ -69,6 +71,11 @@ const datasetLabelText = (dataset: DatasetManifestItem) =>
     dataset.isSample ? " (sample mode)" : ""
   }`;
 const toDatasetMap = (files: DatasetFile[]) => new Map(files.map((file) => [file.id, file]));
+const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
+  if (phase === "file-read") return "file read";
+  if (phase === "parse") return "parse";
+  return "analysis setup";
+};
 
 const folderPickerProps = {
   multiple: true,
@@ -81,7 +88,7 @@ export default function App() {
   const [userDatasetFiles, setUserDatasetFiles] = useState<DatasetFile[]>([]);
   const [datasetId, setDatasetId] = useState(builtinSampleManifest[0]?.id ?? "");
   const [activeDataset, setActiveDataset] = useState<ParsedDataset | null>(null);
-  const [datasetLoadError, setDatasetLoadError] = useState<Error | null>(null);
+  const [datasetLoadError, setDatasetLoadError] = useState<DatasetLoadErrorInfo | null>(null);
   const [isDatasetLoading, setIsDatasetLoading] = useState(true);
   const [isImportingDatasets, setIsImportingDatasets] = useState(false);
   const [datasetImportMessage, setDatasetImportMessage] = useState(
@@ -128,6 +135,29 @@ export default function App() {
     loadParsedDataset(selectedDataset, datasetFilesById)
       .then((dataset) => {
         if (cancelled) return;
+        if (dataset.parseStatus !== "error") {
+          try {
+            const candidateTradeDays = scanCandidateTradeDays(
+              dataset.datasetId,
+              dataset.symbol,
+              dataset.bars1m,
+            );
+            void buildReplayDatasetAnalysis(
+              dataset.datasetId,
+              dataset.symbol,
+              dataset.bars1m,
+              selectedTradeDay || candidateTradeDays[0]?.date,
+            );
+          } catch (error) {
+            throw new DatasetLoadError({
+              datasetId: dataset.datasetId,
+              datasetLabel: selectedDataset.label,
+              sourceLabel: dataset.sourceLabel,
+              phase: "analysis-setup",
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         setActiveDataset(dataset);
         setSelectedTradeDay("");
         setCurrentBarIndex(0);
@@ -137,7 +167,23 @@ export default function App() {
       .catch((error) => {
         if (cancelled) return;
         setActiveDataset(null);
-        setDatasetLoadError(error instanceof Error ? error : new Error(String(error)));
+        const loadError =
+          error instanceof DatasetLoadError
+            ? {
+                datasetId: error.datasetId,
+                datasetLabel: error.datasetLabel,
+                sourceLabel: error.sourceLabel,
+                phase: error.phase,
+                message: error.message,
+              }
+            : {
+                datasetId: selectedDataset.id,
+                datasetLabel: selectedDataset.label,
+                sourceLabel: selectedDataset.path,
+                phase: "analysis-setup" as const,
+                message: error instanceof Error ? error.message : String(error),
+              };
+        setDatasetLoadError(loadError);
         setIsDatasetLoading(false);
       });
 
@@ -445,11 +491,6 @@ export default function App() {
     previousBarsLengthRef.current = bars.length;
   }, [bars]);
 
-
-  if (datasetLoadError) {
-    throw new Error(`Dataset load failed for ${datasetId || "unknown dataset"}: ${datasetLoadError.message}`);
-  }
-
   const selectedDataset = datasets.find((item) => item.id === datasetId) ?? datasets[0] ?? null;
   const selectedDatasetLabel = selectedDataset ? datasetLabelText(selectedDataset) : "UNKNOWN";
   const selectedCandidate =
@@ -552,17 +593,39 @@ export default function App() {
           <div>
             {isDatasetLoading || isImportingDatasets
               ? "Loading dataset…"
+              : datasetLoadError
+                ? "Dataset loader failed."
               : activeDataset?.parseStatus === "error"
                 ? "Dataset parse failed."
                 : "Dataset scan pending or unavailable."}
           </div>
           <div>Dataset source: {selectedDataset ? describeSourceType(selectedDataset.sourceType) : "none"}</div>
+          {!isDatasetLoading && datasetLoadError ? (
+            <div>
+              Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}
+            </div>
+          ) : null}
           {!isDatasetLoading && activeDataset?.parseStatus === "error" ? (
             <div>
               Why unavailable: {activeDataset.parseErrors[0] ?? "Unknown parse error."}
             </div>
           ) : null}
         </section>
+        {!isDatasetLoading && datasetLoadError ? (
+          <section className="footer-grid">
+            <div>
+              <h3>Diagnostics</h3>
+              <ul>
+                <li>Dataset: {datasetLoadError.datasetLabel}</li>
+                <li>Dataset id: {datasetLoadError.datasetId}</li>
+                <li>Dataset file: {datasetLoadError.sourceLabel}</li>
+                <li>Dataset source: {describeSourceType(selectedDataset?.sourceType ?? "sample")}</li>
+                <li>Load failure phase: {loaderPhaseLabel(datasetLoadError.phase)}</li>
+                <li>Loader/runtime message: {datasetLoadError.message}</li>
+              </ul>
+            </div>
+          </section>
+        ) : null}
         {!isDatasetLoading && activeDataset?.parseStatus === "error" ? (
           <section className="footer-grid">
             <div>

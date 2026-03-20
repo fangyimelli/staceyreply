@@ -2,6 +2,7 @@ import { buildSampleCsv } from './sampleData';
 import { parseDatasetFile } from '../parser/fileParser';
 import type {
   DatasetFile,
+  DatasetLoadFailurePhase,
   DatasetManifestItem,
   ParsedDataset,
   UserDatasetSource,
@@ -27,6 +28,34 @@ const getRelativePath = (file: File) => file.webkitRelativePath || file.name;
 
 const toDatasetId = (sourceType: UserDatasetSource, relativePath: string) =>
   `${sourceType}:${relativePath.toLowerCase()}`;
+
+export class DatasetLoadError extends Error {
+  datasetId: string;
+  datasetLabel: string;
+  sourceLabel: string;
+  phase: DatasetLoadFailurePhase;
+
+  constructor({
+    datasetId,
+    datasetLabel,
+    sourceLabel,
+    phase,
+    message,
+  }: {
+    datasetId: string;
+    datasetLabel: string;
+    sourceLabel: string;
+    phase: DatasetLoadFailurePhase;
+    message: string;
+  }) {
+    super(message);
+    this.name = 'DatasetLoadError';
+    this.datasetId = datasetId;
+    this.datasetLabel = datasetLabel;
+    this.sourceLabel = sourceLabel;
+    this.phase = phase;
+  }
+}
 
 export const getBuiltinSampleManifest = (): DatasetManifestItem[] => [
   {
@@ -73,17 +102,40 @@ export const loadParsedDataset = async (
   manifest: DatasetManifestItem,
   datasetFilesById: Map<string, DatasetFile>,
 ): Promise<ParsedDataset> => {
-  if (manifest.isSample) return parseDatasetFile(sampleDatasetFile);
+  if (manifest.isSample) {
+    try {
+      return parseDatasetFile(sampleDatasetFile);
+    } catch (error) {
+      throw new DatasetLoadError({
+        datasetId: manifest.id,
+        datasetLabel: manifest.label,
+        sourceLabel: sampleDatasetFile.label,
+        phase: 'parse',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   const datasetFile = datasetFilesById.get(manifest.id);
-  return parseDatasetFile(
-    datasetFile ?? {
-      id: manifest.id,
-      label: manifest.label,
-      path: manifest.path,
-      kind: manifest.kind,
-      raw: '',
-      sourceType: manifest.sourceType,
-    },
-  );
+  if (!datasetFile) {
+    throw new DatasetLoadError({
+      datasetId: manifest.id,
+      datasetLabel: manifest.label,
+      sourceLabel: manifest.path,
+      phase: 'file-read',
+      message: 'Dataset file contents were unavailable when the loader attempted to parse them.',
+    });
+  }
+
+  try {
+    return parseDatasetFile(datasetFile);
+  } catch (error) {
+    throw new DatasetLoadError({
+      datasetId: manifest.id,
+      datasetLabel: manifest.label,
+      sourceLabel: datasetFile.label,
+      phase: 'parse',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 };
