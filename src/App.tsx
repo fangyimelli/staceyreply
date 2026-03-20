@@ -303,7 +303,7 @@ export default function App() {
     if (!analysis) return;
     if (tradeState.mode !== "auto") return;
     const side = tradeSideForTemplate(analysis.template);
-    const bar = analysis.timeframeBars["1m"][currentBarIndex];
+    const bar = currentReplayBar;
     if (!side || !bar) return;
 
     setTradeState((prev) => {
@@ -374,10 +374,13 @@ export default function App() {
     });
   }, [analysis, currentBarIndex, tradeState.mode]);
 
-  const currentReplayTime =
-    activeDataset?.bars1m[
-      Math.min(currentBarIndex, Math.max((activeDataset?.bars1m.length ?? 1) - 1, 0))
-    ]?.time;
+  const replayBars1m = analysis?.timeframeBars["1m"] ?? [];
+  const clampedCurrentBarIndex = Math.min(
+    currentBarIndex,
+    Math.max(replayBars1m.length - 1, 0),
+  );
+  const currentReplayBar = replayBars1m[clampedCurrentBarIndex];
+  const currentReplayTime = currentReplayBar?.time;
 
   if (analysis) {
     const timeframeBars = analysis.timeframeBars[timeframe];
@@ -392,11 +395,9 @@ export default function App() {
   }
 
   const bars = useMemo(() => {
-    if (!analysis) return [];
+    if (!analysis || !currentReplayTime) return [];
     return analysis.timeframeBars[timeframe].filter(
-      (bar) =>
-        new Date(bar.time).getTime() <=
-        new Date(currentReplayTime ?? bar.time).getTime(),
+      (bar) => new Date(bar.time).getTime() <= new Date(currentReplayTime).getTime(),
     );
   }, [analysis, timeframe, currentReplayTime]);
   const ema20 = useMemo(() => {
@@ -612,7 +613,7 @@ export default function App() {
       event.title === "Entry valid" &&
       event.visibleFromIndex <= currentBarIndex,
   );
-  const current1mBar = analysis.timeframeBars["1m"][currentBarIndex];
+  const current1mBar = currentReplayBar;
   const parsedManualEntryInput = Number(manualEntryInput);
   const hasManualEntryInput =
     manualEntryInput.trim().length > 0 && Number.isFinite(parsedManualEntryInput);
@@ -687,7 +688,7 @@ export default function App() {
       : undefined;
 
   const openManualTrade = (side: TradeSide) => {
-    const bar = analysis.timeframeBars["1m"][currentBarIndex];
+    const bar = currentReplayBar;
     if (!bar || tradeState.mode !== "manual" || tradeState.currentPosition) return;
     if (!analysis.lastReplyEval.canReply || !entryGateOpen || !manualEntryPriceReady) return;
     tradeIdRef.current += 1;
@@ -709,7 +710,7 @@ export default function App() {
   };
 
   const exitManualTrade = () => {
-    const bar = analysis.timeframeBars["1m"][currentBarIndex];
+    const bar = currentReplayBar;
     if (!bar || !tradeState.currentPosition) return;
     setTradeState((prev) => {
       if (!prev.currentPosition) return prev;
