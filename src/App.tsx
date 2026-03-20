@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DatasetLoadError,
-  getPreprocessedDatasetManifest,
+  getBuiltinSampleManifest,
   loadParsedDataset,
 } from "./data/loadDatasets";
 import { nextStageStop } from "./replay/engine";
@@ -63,7 +63,6 @@ const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   if (phase === "parse") return "parse";
   return "analysis setup";
 };
-
 
 export default function App() {
   const [page, setPage] = useState<"replay" | "debug">("replay");
@@ -211,7 +210,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [datasets, datasetId]);
+  }, [datasetFilesById, datasets, datasetId]);
 
   const datasetAnalysis = useMemo(() => {
     if (!activeDataset) return null;
@@ -493,8 +492,19 @@ export default function App() {
       <div className="app-shell">
         <header>
           <h1>Stacey Reply Replay</h1>
-          <p>Preprocessed pair library loaded locally. No broker API.</p>
+          <p>
+            Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.
+          </p>
         </header>
+        <section className="upload-grid">
+          <div className="upload-card">
+            <h3>Replay dataset flow</h3>
+            <p>{datasetImportMessage}</p>
+            <p className="upload-note">
+              Fixed `data/` raw CSV → preprocessing → pair selection → automatic replay dataset load.
+            </p>
+          </div>
+        </section>
         <section className="control-grid">
         <button
           className={page === "replay" ? "active-toggle" : ""}
@@ -534,8 +544,8 @@ export default function App() {
             >
               <option value="">
                 {activeDataset?.parseStatus === "error"
-                  ? "Pair scan unavailable"
-                  : "Select a pair to inspect detected Day 3 candidates"}
+                  ? "Dataset scan unavailable"
+                  : "Wait for pair scan to complete"}
               </option>
             </select>
           </label>
@@ -543,14 +553,14 @@ export default function App() {
         <section className="info-strip">
           <div>
             {isDatasetLoading
-              ? "Loading pair…"
+              ? "Loading dataset…"
               : datasetLoadError
                 ? "Pair loader failed."
               : activeDataset?.parseStatus === "error"
-                ? "Pair parse failed."
+                ? "Dataset parse failed."
                 : "Pair scan pending or unavailable."}
           </div>
-          <div>Pair source: {selectedDataset ? describeSourceType() : "none"}</div>
+          <div>Dataset source: {selectedDataset ? describeSourceType() : "none"}</div>
           {!isDatasetLoading && datasetLoadError ? (
             <div>
               Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}
@@ -567,10 +577,10 @@ export default function App() {
             <div>
               <h3>Diagnostics</h3>
               <ul>
-                <li>Pair: {datasetLoadError.datasetLabel}</li>
-                <li>Pair id: {datasetLoadError.datasetId}</li>
-                <li>Pair file: {datasetLoadError.sourceLabel}</li>
-                <li>Pair source: {describeSourceType()}</li>
+                <li>Dataset: {datasetLoadError.datasetLabel}</li>
+                <li>Dataset id: {datasetLoadError.datasetId}</li>
+                <li>Dataset file: {datasetLoadError.sourceLabel}</li>
+                <li>Dataset source: {describeSourceType()}</li>
                 <li>Load failure phase: {loaderPhaseLabel(datasetLoadError.phase)}</li>
                 <li>Loader/runtime message: {datasetLoadError.message}</li>
               </ul>
@@ -582,9 +592,9 @@ export default function App() {
             <div>
               <h3>Diagnostics</h3>
               <ul>
-                <li>Pair: {selectedDatasetLabel}</li>
-                <li>Pair file: {activeDataset.sourceLabel}</li>
-                <li>Pair source: {describeSourceType()}</li>
+                <li>Dataset: {selectedDatasetLabel}</li>
+                <li>Dataset file: {activeDataset.sourceLabel}</li>
+                <li>Dataset source: {describeSourceType()}</li>
                 <li>Parse status: {activeDataset.parseStatus}</li>
                 <li>Failure reasons: {activeDataset.parseErrors.join(" | ")}</li>
                 <li>
@@ -749,8 +759,19 @@ export default function App() {
     <div className="app-shell">
       <header>
         <h1>Stacey Reply Replay</h1>
-        <p>Preprocessed pair library loaded locally. No broker API.</p>
+        <p>
+          Fixed `data/` replay pipeline with pair selection and automatic dataset loading. No broker API.
+        </p>
       </header>
+      <section className="upload-grid">
+        <div className="upload-card">
+          <h3>Replay dataset flow</h3>
+          <p>{datasetImportMessage}</p>
+          <p className="upload-note">
+            Datasets are expected to arrive from the fixed `data/` preprocessing flow, then scan into pair/day selectors automatically.
+          </p>
+        </div>
+      </section>
       <section className="control-grid">
         <button
           className={page === "replay" ? "active-toggle" : ""}
@@ -916,8 +937,8 @@ export default function App() {
         ) : null}
       </section>
       <section className="info-strip">
-        <div>Pair status: {isDatasetLoading ? "loading" : "ready"}</div>
-        <div>Pair source: {describeSourceType()}</div>
+        <div>Dataset status: {isDatasetLoading ? "loading" : "ready"}</div>
+        <div>Dataset source: {describeSourceType()}</div>
         <div>Parse status: {activeDataset.parseStatus}</div>
         <div>Trade day: {analysis.selectedTradeDay}</div>
         <div>Candidate summary: {selectedCandidate?.summaryReason ?? "none"}</div>
@@ -1017,8 +1038,8 @@ export default function App() {
         <div>
           <h3>Diagnostics</h3>
           <ul>
-            <li>Pair file: {activeDataset.sourceLabel}</li>
-            <li>Pair source: {describeSourceType()}</li>
+            <li>Dataset file: {activeDataset.sourceLabel}</li>
+            <li>Dataset source: {describeSourceType()}</li>
             <li>Bars loaded: {activeDataset.bars1m.length}</li>
             <li>Parse errors: {activeDataset.parseErrors.join(" | ") || "none"}</li>
             <li>Accepted formats / notes: {activeDataset.parseDiagnostics.join(" | ") || "none"}</li>

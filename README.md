@@ -16,6 +16,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - 高週期一律由 1m 原始資料聚合
 - pair-level 掃描候選 Day 3 日期，輸出 FGD / FRD / invalid 分類與摘要原因
 - Candidate Day 3 selector 會清楚列出偵測到的日期；`Manual Reply` 或啟用 `needs-practice` 篩選時只顯示 `needs-practice` 候選日，否則顯示完整掃描結果
+- replay dataset 會保留以前後各 2 天為目標的事件視窗；若資料不足則使用可得區間
 - FGD / FRD Day 3 規則驗證與 replay analysis
 - pair validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
