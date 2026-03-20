@@ -39,7 +39,7 @@ const datasetImportMessage =
 const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
 const tradeSideForTemplate = (template?: string): TradeSide | null =>
-  template === "FGD" ? "long" : template === "FRD" ? "short" : null;
+  template === "FGD" ? "long" : template === "FRD" || template === "FRD_INSIDE" ? "short" : null;
 const formatPnL = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
 const formatPrice = (value?: number) =>
   value === undefined || Number.isNaN(value) ? "n/a" : value.toFixed(4);
@@ -68,7 +68,7 @@ const toCandidateTradeDay = (candidate: PairCandidateSummary): CandidateTradeDay
   date: candidate.candidateDate,
   template: candidate.template,
   practiceStatus: candidate.practiceStatus,
-  valid: candidate.template === "FGD" || candidate.template === "FRD",
+  valid: candidate.template === "FGD" || candidate.template === "FRD" || candidate.template === "FRD_INSIDE",
   shortSummary: candidate.shortSummary,
 });
 
@@ -820,6 +820,7 @@ export default function App() {
             hod={analysis.hod}
             lod={analysis.lod}
             statusBanner={analysis.statusBanner}
+            unifiedStrategy={analysis.unifiedStrategy}
             viewport={chartViewport}
             onViewportChange={setChartViewport}
           />

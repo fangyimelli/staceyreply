@@ -1,5 +1,5 @@
 export type Timeframe = "1m" | "5m" | "15m" | "1h" | "4h" | "1D";
-export type TemplateType = "FGD" | "FRD" | "INVALID" | "INCOMPLETE";
+export type TemplateType = "FGD" | "FRD" | "FRD_INSIDE" | "INVALID" | "INCOMPLETE";
 export type ReplayMode = "pause" | "auto" | "semi";
 export type PracticeStatus = "needs-practice" | "auto-only" | "filtered-out";
 export type TradeSide = "long" | "short";
@@ -197,6 +197,75 @@ export interface TradeLevel {
   missingGate?: string;
 }
 
+export type UnifiedTemplateType = "FGD" | "FRD" | "FRD_INSIDE";
+export type UnifiedScoreBand =
+  | "textbook"
+  | "valid"
+  | "aggressive"
+  | "no-trade";
+export type UnifiedFeatureCategory =
+  | "template-edge"
+  | "session-location"
+  | "entry-confirmation"
+  | "quality-behavior";
+export type UnifiedHardGateKey =
+  | "templateValid"
+  | "day3Active"
+  | "sessionTimingValid"
+  | "sourceLocationValid"
+  | "emaEntryValid"
+  | "stopDistanceValid";
+export interface UnifiedHardGate {
+  key: UnifiedHardGateKey;
+  label: string;
+  passed: boolean;
+  reason: string;
+}
+
+export interface UnifiedWeightedFeature {
+  key: string;
+  label: string;
+  value: number | boolean | string;
+  active: boolean;
+  weightFGD: number;
+  weightFRD: number;
+  contribution: number;
+  category: UnifiedFeatureCategory;
+}
+
+export interface UnifiedSignalDayStrategy {
+  templateType?: UnifiedTemplateType;
+  direction: TradeSide;
+  hardGates: UnifiedHardGate[];
+  weightedFeatures: UnifiedWeightedFeature[];
+  score: number;
+  scoreBand: UnifiedScoreBand;
+  entryAllowed: boolean;
+  entryReason: string;
+  debugBreakdown: {
+    byCategory: Record<UnifiedFeatureCategory, number>;
+    topPositiveFeatures: UnifiedWeightedFeature[];
+    missingHighValueFeatures: UnifiedWeightedFeature[];
+    whyEntryBlocked: string[];
+  };
+}
+
+export interface BacktestSignalSnapshot {
+  templateType?: UnifiedTemplateType;
+  direction: TradeSide;
+  score: number;
+  scoreBand: UnifiedScoreBand;
+  hardGates: UnifiedHardGate[];
+  activeFeatures: string[];
+  sourceToPrevClosePips?: number;
+  d1BodyPips?: number;
+  d1BodyPctRange?: number;
+  hit30: boolean;
+  hit35: boolean;
+  hit40: boolean;
+  hit50: boolean;
+}
+
 export interface ReplayVisibility {
   stage: ReplayStageId;
   canEnter: boolean;
@@ -266,6 +335,8 @@ export interface ReplayDatasetAnalysis {
   lod?: number;
   targetLevels: TradeLevel[];
   recommendedTarget?: 30 | 35 | 40 | 50;
+  unifiedStrategy: UnifiedSignalDayStrategy;
+  backtestSnapshot: BacktestSignalSnapshot;
 }
 
 export interface CandidateTradeDay {
