@@ -58,10 +58,14 @@ npm run preprocess:data
 3. 為每個 official pair 產生 `index.json`
 4. 為每個候選事件產生 `events/<eventId>.json`
 5. 在 diagnostics 內列出 `process.cwd()`、`repoRoot`、`preprocessingInputRoot`、`manifestOutputPath`、`outputRootExists`、`officialPairUniverse`、`manifestPairKeys`、`missingOfficialPairs`
-6. `indexPath` 與 `datasetPath` 會固定寫成 `public/preprocessed/<pair>/...` 對應的 web path
+6. `indexPath` 與 `datasetPath` 會固定寫成 `/preprocessed/<pair>/...` 對應的 runtime web path；repo 來源目錄固定為 `public/preprocessed/`
 7. official manifest 產出後，會驗證 4 個 pair 的 `index.json` 與每個 pair `events/` 目錄至少一個 preprocessing 產出的 JSON event 檔
 8. 若缺任何 official pair 或完整性檢查失敗，直接報錯，而不是靜默忽略
 
 ## Sample mode
 
 `sample-1m` 若保留，只能用於 sample/demo 模式，且必須輸出到 `public/preprocessed-sample/`；不可混入正式 pair selector、`public/preprocessed/manifest.json` 或正式 event 輸出。
+
+## Hosting requirement
+
+`/preprocessed/**` 必須永遠優先走靜態檔，不可進入 SPA fallback。

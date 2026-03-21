@@ -6,7 +6,7 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 
 - 正式 pair universe 固定為 `EURUSD` / `USDCAD` / `GBPUSD` / `AUDUSD`；正式模式只接受這 4 個 pair，並由單一 official config 集中定義 `dist/mnt/data` input root、固定檔名與 FX metadata 後再預處理
 - 提供明確的預處理入口 `npm run preprocess:data`，從 `data/` 讀 raw CSV、轉成標準 1m bars，並為每個候選事件預先輸出 5m / 15m / 1h / 4h / 1D bars 到單一 event replay dataset 產物
-- app 啟動時只讀 `public/preprocessed/manifest.json`，選 pair 時只讀對應 `index.json`，選中候選事件後才讀單一 event dataset，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
+- app 啟動時只讀 repo 內 `public/preprocessed/manifest.json`，並在瀏覽器以 `/preprocessed/manifest.json` 載入；選 pair 時只讀對應 `/preprocessed/<pair>/index.json`，選中候選事件後才讀單一 `/preprocessed/<pair>/events/<eventId>.json` dataset，不再依賴瀏覽器任意檔案 / JSON 匯入主流程
 - `index.json` 僅保留候選事件摘要欄位：`eventId`、`candidateDate`、`template`、`shortSummary`、`practiceStatus`、`datasetPath`；完整 `bars` / annotations / trace 只存在單一 event dataset 檔案
 - parser 主責任為讀取 raw CSV 並正規化為 strategy 可用的標準 1m bars
 - CSV 支援 BOM 移除、comma/tab 分隔、`time/date/datetime/timestamp` 時間欄位別名，以及可省略的 `volume/vol`
@@ -46,6 +46,10 @@ npm run dev
 
 `npm run dev` 會先自動執行 `npm run preprocess:data`，再啟動 Vite。
 
+Vite 設定已明確固定：`publicDir = "public"`、`build.outDir = "dist"`。正式 replay JSON 固定從 repo 的 `public/preprocessed/` 複製到 build 後的 `dist/preprocessed/`，並在瀏覽器固定以 `/preprocessed/**` 存取。
+
+本機 `vite dev` / `vite preview` 也會在 middleware 中顯式 mount `/preprocessed` 到實際的 `public/preprocessed/` 目錄，避免資料請求誤走 SPA fallback。
+
 ## Data contract
 
 詳細規格請看：[`data/README.md`](data/README.md)
@@ -54,7 +58,7 @@ npm run dev
 
 1. 正式原始資料固定來自 single official config 對應的 `dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv`、`DAT_MT_USDCAD_M1_2025.csv`、`DAT_MT_GBPUSD_M1_2025.csv`、`DAT_MT_AUDUSD_M1_2025.csv`
 2. 預處理腳本只處理這 4 個官方 CSV，不再依賴資料夾掃描，也不再用字串 replace 推導 source path
-3. 輸出 `public/preprocessed/manifest.json`、`public/preprocessed/<pair>/index.json` 與 `public/preprocessed/<pair>/events/<eventId>.json`
+3. 輸出 repo 內 `public/preprocessed/manifest.json`、`public/preprocessed/<pair>/index.json` 與 `public/preprocessed/<pair>/events/<eventId>.json`；正式 runtime URL 一律對應 `/preprocessed/...`
 4. app 依序 lazy-load 預處理結果，正式模式不會 fallback 到 sample-1m
 
 ## Preprocessing flow
@@ -70,7 +74,7 @@ npm run preprocess:data
 3. 寫出 `public/preprocessed/manifest.json`，其中包含 official pair universe / manifest pair keys / missing official pairs / skipped pair folders diagnostics，以及 `process.cwd()`、`repoRoot`、`preprocessingInputRoot`、`manifestOutputPath`、`outputRootExists`
 4. 針對每個 official pair 寫出 `public/preprocessed/<pair-slug>/index.json`
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
-6. manifest `indexPath` 與 candidate `datasetPath` 一律寫成 `public/preprocessed/<pair>/...` 對應的 web path
+6. manifest `indexPath` 與 candidate `datasetPath` 一律寫成 `/preprocessed/<pair>/...` 對應的 runtime web path；不要混用其他輸出位置
 7. official manifest 產出後，會額外驗證 4 個 pair 的 `index.json` 與每個 `events/` 目錄至少一個 preprocessing 產出的 JSON event 檔；任何一項缺失都視為整體失敗
 8. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
 9. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
@@ -158,3 +162,9 @@ Diagnostics 也會同步列出：
 - 已移除面向瀏覽器任意檔案匯入的主路徑依賴
 - 不再依賴 `File`、`file.text()`、`webkitRelativePath`、JSON root array 匯入流程
 - 不再顯示單檔 / 資料夾上傳；現在改為 `data/` + 預處理 manifest/index 驅動的 pair 載入
+
+## Deployment
+
+- `/preprocessed/**` **must bypass SPA fallback**。
+- 若部署平台有 rewrite / redirect / SPA fallback 規則，必須先讓 `/preprocessed/**` 走靜態檔，再讓其餘路徑 fallback 到 `index.html`。
+- 部署細節與範例請見 [`DEPLOYMENT.md`](DEPLOYMENT.md)。
