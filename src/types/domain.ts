@@ -177,6 +177,10 @@ export interface DatasetFetchDiagnostics {
   contentType?: string;
   first80Chars?: string;
   fileExistsAtBuildTime?: boolean;
+  staticCheckUrl?: string;
+  staticCheckStatus?: number;
+  staticCheckContentType?: string;
+  staticCheckFirst80Chars?: string;
 }
 
 export interface DatasetLoadErrorInfo {
