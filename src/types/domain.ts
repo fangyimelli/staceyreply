@@ -108,6 +108,13 @@ export interface PairCandidateSummary {
 }
 
 export interface PairCandidateIndex {
+  diagnostics?: {
+    generatedAt: string;
+    candidateCount: number;
+    eventFileCount: number;
+    indexPath: string;
+    eventsPath: string;
+  };
   pairId: string;
   pairLabel: string;
   sourceLabel: string;

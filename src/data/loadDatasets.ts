@@ -32,8 +32,8 @@ const buildPairIndexFileExistsDiagnostic = (
   if (skippedPairFolder) {
     return false;
   }
-  if (manifestDiagnostics.manifestPairKeys.includes(manifest.pairKey)) {
-    return true;
+  if (manifestDiagnostics.failureReasonPerPair[manifest.pairKey]) {
+    return false;
   }
   return undefined;
 };

@@ -57,9 +57,9 @@ npm run preprocess:data
 2. 產生 `manifest.json`
 3. 為每個 official pair 產生 `index.json`
 4. 為每個候選事件產生 `events/<eventId>.json`
-5. 在 diagnostics 內列出 `process.cwd()`、`repoRoot`、`preprocessingInputRoot`、`manifestOutputPath`、`outputRootExists`、`officialPairUniverse`、`manifestPairKeys`、`missingOfficialPairs`
+5. 在 diagnostics 內列出 `process.cwd()`、`repoRoot`、`preprocessingInputRoot`、`manifestOutputPath`、`outputRootExists`、`officialPairUniverse`、`manifestPairKeys`、`missingOfficialPairs`，且若某 pair 的 `index.json` 未成功寫出，必須更新 `missingPairFolders` / `failureReasonPerPair`，並不可把該 pair 放入 `manifestPairKeys` 或 `preprocessingSucceededPairs`
 6. `indexPath` 與 `datasetPath` 會固定寫成 `/preprocessed/<pair>/...` 對應的 runtime web path；repo 來源目錄固定為 `public/preprocessed/`
-7. official manifest 產出後，會驗證 4 個 pair 的 `index.json` 與每個 pair `events/` 目錄至少一個 preprocessing 產出的 JSON event 檔
+7. official manifest 產出後，會驗證 manifest 內列出的 `index.json` 與 index 內宣告的每個 event JSON 都是 preprocessing 實際寫出的可讀靜態檔；若 pair 沒有 candidate，仍必須保留可讀的空 `index.json`
 8. 若缺任何 official pair 或完整性檢查失敗，直接報錯，而不是靜默忽略
 
 ## Sample mode

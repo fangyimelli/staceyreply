@@ -58,7 +58,7 @@ Vite 設定已明確固定：`publicDir = "public"`、`build.outDir = "dist"`。
 
 1. 正式原始資料固定來自 single official config 對應的 `dist/mnt/data/DAT_MT_EURUSD_M1_2025.csv`、`DAT_MT_USDCAD_M1_2025.csv`、`DAT_MT_GBPUSD_M1_2025.csv`、`DAT_MT_AUDUSD_M1_2025.csv`
 2. 預處理腳本只處理這 4 個官方 CSV，不再依賴資料夾掃描，也不再用字串 replace 推導 source path
-3. 輸出 repo 內 `public/preprocessed/manifest.json`、`public/preprocessed/<pair>/index.json` 與 `public/preprocessed/<pair>/events/<eventId>.json`；正式 runtime URL 一律對應 `/preprocessed/...`
+3. 輸出 repo 內 `public/preprocessed/manifest.json`、`public/preprocessed/<pair>/index.json` 與 `public/preprocessed/<pair>/events/<eventId>.json`；正式 runtime URL 一律對應 `/preprocessed/...`，且 manifest 只能列出實際已寫出、可被靜態服務 GET 到的 `index.json` / `events/<eventId>.json`
 4. app 依序 lazy-load 預處理結果，正式模式不會 fallback 到 sample-1m
 
 ## Preprocessing flow
@@ -72,10 +72,10 @@ npm run preprocess:data
 1. 依 single official config / `OFFICIAL_PAIRS` registry 固定處理 `eurusd` / `usdcad` / `gbpusd` / `audusd` 4 個 CSV
 2. parser 讀取 raw CSV 並轉成標準 1m bars
 3. 寫出 `public/preprocessed/manifest.json`，其中包含 official pair universe / manifest pair keys / missing official pairs / skipped pair folders diagnostics，以及 `process.cwd()`、`repoRoot`、`preprocessingInputRoot`、`manifestOutputPath`、`outputRootExists`
-4. 針對每個 official pair 寫出 `public/preprocessed/<pair-slug>/index.json`
+4. 針對每個 official pair 寫出 `public/preprocessed/<pair-slug>/index.json`；即使 `candidateCount = 0` 也必須輸出可被 GET 的空 index，至少包含 `pairKey`、`candidates: []` 與 diagnostics
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
 6. manifest `indexPath` 與 candidate `datasetPath` 一律寫成 `/preprocessed/<pair>/...` 對應的 runtime web path；不要混用其他輸出位置
-7. official manifest 產出後，會額外驗證 4 個 pair 的 `index.json` 與每個 `events/` 目錄至少一個 preprocessing 產出的 JSON event 檔；任何一項缺失都視為整體失敗
+7. official manifest 產出後，會額外驗證 manifest 內列出的每個 `index.json` 都實際存在且可讀，並驗證 index 內宣告的每個 `events/<eventId>.json` 都實際存在；`candidateCount = 0` 的 pair 只要求空 `index.json` 可讀，不要求 event JSON
 8. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
 9. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
 10. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
