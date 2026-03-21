@@ -263,6 +263,7 @@ const sliceEventWindow = (bars, candidateDate) => {
 };
 
 const toRepoRelativePath = (absolutePath) => path.relative(repoRoot, absolutePath).replace(/\\/g, '/');
+const normalizeAssetPath = (value) => value.replace(/^\/+/, '');
 const pathExists = async (targetPath) => {
   try {
     await access(targetPath);
@@ -271,27 +272,37 @@ const pathExists = async (targetPath) => {
     return false;
   }
 };
-const verifyOfficialManifestIntegrity = async () => {
+const verifyOfficialManifestIntegrity = async (manifest) => {
   const failures = [];
-  for (const pair of OFFICIAL_PAIRS) {
-    const pairOutputRoot = path.join(outputRoot, pair.pairKey);
+  for (const pairKey of OFFICIAL_PAIR_KEYS) {
+    const pairOutputRoot = path.join(outputRoot, pairKey);
     const indexFilePath = path.join(pairOutputRoot, 'index.json');
-    const eventsRoot = path.join(pairOutputRoot, 'events');
     const hasIndex = await pathExists(indexFilePath);
-    if (!hasIndex) {
-      failures.push(`${pair.pairKey}: missing ${toRepoRelativePath(indexFilePath)}`);
+    const manifestEntry = manifest.pairs.find((pair) => pair.pairKey === pairKey);
+    if (!manifestEntry) {
+      if (hasIndex) {
+        failures.push(`${pairKey}: ${toRepoRelativePath(indexFilePath)} exists but pair is missing from manifest.json`);
+      }
       continue;
     }
-    let eventFiles = [];
-    try {
-      eventFiles = (await readdir(eventsRoot, { withFileTypes: true }))
-        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.json'))
-        .map((entry) => entry.name);
-    } catch {
-      eventFiles = [];
+    if (!hasIndex) {
+      failures.push(`${pairKey}: manifest lists missing ${toRepoRelativePath(indexFilePath)}`);
+      continue;
     }
-    if (eventFiles.length === 0) {
-      failures.push(`${pair.pairKey}: missing preprocessing event JSON files in ${toRepoRelativePath(eventsRoot)}`);
+
+    const indexPayload = JSON.parse(await readFile(indexFilePath, 'utf8'));
+    const indexCandidates = Array.isArray(indexPayload.candidates) ? indexPayload.candidates : [];
+    if (indexCandidates.length !== manifestEntry.candidateCount) {
+      failures.push(`${pairKey}: manifest candidateCount=${manifestEntry.candidateCount} but index.json has ${indexCandidates.length} candidate(s)`);
+    }
+
+    for (const candidate of indexCandidates) {
+      const relativeDatasetPath = normalizeAssetPath(candidate?.datasetPath ?? '');
+      const absoluteDatasetPath = path.join(repoRoot, 'public', relativeDatasetPath);
+      const hasDataset = relativeDatasetPath ? await pathExists(absoluteDatasetPath) : false;
+      if (!hasDataset) {
+        failures.push(`${pairKey}: index references missing ${relativeDatasetPath || 'event dataset path'}`);
+      }
     }
   }
   if (failures.length > 0) {
@@ -417,6 +428,13 @@ const main = async () => {
 
       const indexPath = toWebPath(pair.pairKey, 'index.json');
       const pairIndex = {
+        diagnostics: {
+          generatedAt: manifest.generatedAt,
+          candidateCount: candidateSummaries.length,
+          eventFileCount: candidateSummaries.length,
+          indexPath,
+          eventsPath: toWebPath(pair.pairKey, 'events'),
+        },
         pairId: datasetId,
         pairLabel: pair.displayName,
         sourceLabel,
@@ -464,8 +482,16 @@ const main = async () => {
   manifest.diagnostics.manifestPairCount = manifest.pairs.length;
   manifest.diagnostics.manifestPairKeys = manifest.pairs.map((pair) => pair.pairKey);
   diagnostics.manifestPairKeys = manifest.diagnostics.manifestPairKeys;
+  diagnostics.preprocessingSucceededPairs = [...manifest.diagnostics.preprocessingSucceededPairs];
+  diagnostics.preprocessingFailedPairs = [...manifest.diagnostics.preprocessingFailedPairs];
+  diagnostics.failureReasonPerPair = { ...manifest.diagnostics.failureReasonPerPair };
   manifest.diagnostics.missingOfficialPairs = OFFICIAL_PAIR_KEYS.filter((pairKey) => !manifest.pairs.some((manifestPair) => manifestPair.pairKey === pairKey));
-  manifest.diagnostics.missingPairFolders = [...manifest.diagnostics.missingOfficialPairs];
+  manifest.diagnostics.missingPairFolders = [
+    ...new Set([
+      ...manifest.diagnostics.missingOfficialPairs,
+      ...manifest.diagnostics.skippedPairFolders.map((entry) => entry.pairKey),
+    ]),
+  ];
 
   logDiagnostics();
 
@@ -478,7 +504,7 @@ const main = async () => {
   }
 
   await writeFile(manifestOutputPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  await verifyOfficialManifestIntegrity();
+  await verifyOfficialManifestIntegrity(manifest);
 
   console.log(`Preprocessed ${manifest.pairs.length} official pair(s) into public/preprocessed.`);
 };
