@@ -235,6 +235,8 @@ const slicePrecomputedTimeframeBars = (fullTimeframeBars, windowDays) => {
 };
 
 const toWebPath = (...segments) => path.posix.join('preprocessed', ...segments);
+const getPairIndexFilePath = (pairKey) => path.join(outputRoot, pairKey, 'index.json');
+const getPairIndexWebPath = (pairKey) => toWebPath(pairKey, 'index.json');
 const buildCandidateSummaries = (parsed, pairKey) => {
   const barsByDay = groupByNyDate(parsed.bars1m);
   const days = Object.keys(barsByDay).sort();
@@ -276,7 +278,7 @@ const verifyOfficialManifestIntegrity = async (manifest) => {
   const failures = [];
   for (const pairKey of OFFICIAL_PAIR_KEYS) {
     const pairOutputRoot = path.join(outputRoot, pairKey);
-    const indexFilePath = path.join(pairOutputRoot, 'index.json');
+    const indexFilePath = getPairIndexFilePath(pairKey);
     const hasIndex = await pathExists(indexFilePath);
     const manifestEntry = manifest.pairs.find((pair) => pair.pairKey === pairKey);
     if (!manifestEntry) {
@@ -285,12 +287,20 @@ const verifyOfficialManifestIntegrity = async (manifest) => {
       }
       continue;
     }
+    const expectedIndexPath = getPairIndexWebPath(pairKey);
+    if (manifestEntry.indexPath !== expectedIndexPath) {
+      failures.push(`${pairKey}: manifest indexPath=${manifestEntry.indexPath} but expected ${expectedIndexPath}`);
+    }
     if (!hasIndex) {
       failures.push(`${pairKey}: manifest lists missing ${toRepoRelativePath(indexFilePath)}`);
       continue;
     }
 
     const indexPayload = JSON.parse(await readFile(indexFilePath, 'utf8'));
+    const declaredIndexPath = indexPayload?.diagnostics?.indexPath;
+    if (declaredIndexPath !== expectedIndexPath) {
+      failures.push(`${pairKey}: index diagnostics indexPath=${declaredIndexPath} but expected ${expectedIndexPath}`);
+    }
     const indexCandidates = Array.isArray(indexPayload.candidates) ? indexPayload.candidates : [];
     if (indexCandidates.length !== manifestEntry.candidateCount) {
       failures.push(`${pairKey}: manifest candidateCount=${manifestEntry.candidateCount} but index.json has ${indexCandidates.length} candidate(s)`);
@@ -397,6 +407,10 @@ const main = async () => {
       const fullTimeframeBars = buildTimeframeBarMap(parsed.bars1m);
       const pairOutputRoot = path.join(outputRoot, pair.pairKey);
       const eventsRoot = path.join(pairOutputRoot, 'events');
+      // Invariant: every official pair always emits public/preprocessed/<pair>/index.json,
+      // even when candidateCount === 0. Create the pair directory up front so the
+      // advertised manifest indexPath always has a concrete on-disk target.
+      await mkdir(pairOutputRoot, { recursive: true });
       await mkdir(eventsRoot, { recursive: true });
 
       for (const candidate of candidateSummaries) {
@@ -426,7 +440,7 @@ const main = async () => {
         await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload)}\n`, 'utf8');
       }
 
-      const indexPath = toWebPath(pair.pairKey, 'index.json');
+      const indexPath = getPairIndexWebPath(pair.pairKey);
       const pairIndex = {
         diagnostics: {
           generatedAt: manifest.generatedAt,
@@ -451,7 +465,7 @@ const main = async () => {
           datasetPath,
         })),
       };
-      await writeFile(path.join(pairOutputRoot, 'index.json'), `${JSON.stringify(pairIndex)}\n`, 'utf8');
+      await writeFile(getPairIndexFilePath(pair.pairKey), `${JSON.stringify(pairIndex)}\n`, 'utf8');
 
       const barsByDay = groupByNyDate(parsed.bars1m);
       const allDays = Object.keys(barsByDay).sort();

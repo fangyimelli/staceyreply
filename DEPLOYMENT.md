@@ -18,6 +18,8 @@ If your hosting platform supports rewrites, redirects, or SPA fallback rules, ma
 
 Reason: the app expects JSON at `/preprocessed/manifest.json`, `/preprocessed/<pair>/index.json`, and `/preprocessed/<pair>/events/<eventId>.json`. If the host rewrites those requests to `index.html`, the client receives HTML instead of JSON and replay loading fails.
 
+Preprocessing also guarantees that each official pair (`eurusd`, `usdcad`, `gbpusd`, `audusd`) emits `public/preprocessed/<pair>/index.json` on disk on every successful run. Even when a pair has `candidateCount = 0`, the script still writes a valid empty index so any advertised manifest `indexPath` always resolves to a real JSON file.
+
 ## Required hosting behavior
 
 1. Serve `dist/preprocessed/**` as normal static files.
