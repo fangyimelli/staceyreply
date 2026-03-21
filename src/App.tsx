@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DatasetLoadError,
+  STATIC_HTML_REWRITE_MESSAGE,
   getManifestDiagnostics,
   getPreprocessedDatasetManifest,
   loadPairCandidateIndex,
@@ -67,6 +68,18 @@ const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   if (phase === "parse") return "parse";
   return "analysis setup";
 };
+const hasStaticAssetRewriteDiagnostics = (error: DatasetLoadErrorInfo | null) => {
+  if (!error) return false;
+  const diagnostics = error.diagnostics;
+  return (
+    error.message === STATIC_HTML_REWRITE_MESSAGE ||
+    (diagnostics?.contentType?.toLowerCase().includes("text/html") ?? false) ||
+    (diagnostics?.first80Chars?.trim().toLowerCase().startsWith("<!doctype") ?? false) ||
+    (diagnostics?.first80Chars?.trim().toLowerCase().startsWith("<html") ?? false)
+  );
+};
+const staticAssetIssueHelpText =
+  "This load failure points to static asset serving / SPA fallback rewrite behavior, not strategy rules or preprocessing decision logic.";
 const toCandidateTradeDay = (candidate: PairCandidateSummary): CandidateTradeDay => ({
   eventId: candidate.eventId,
   date: candidate.candidateDate,
@@ -653,6 +666,12 @@ export default function App() {
           <section className="footer-grid">
             <div>
               <h3>Diagnostics</h3>
+              {hasStaticAssetRewriteDiagnostics(datasetLoadError) ? (
+                <>
+                  <p><strong>{STATIC_HTML_REWRITE_MESSAGE}</strong></p>
+                  <p>{staticAssetIssueHelpText}</p>
+                </>
+              ) : null}
               <ul>
                 <li>Dataset: {datasetLoadError.datasetLabel}</li>
                 <li>Dataset id: {datasetLoadError.datasetId}</li>
@@ -660,11 +679,15 @@ export default function App() {
                 <li>Dataset source: {describeSourceType()}</li>
                 <li>Load failure phase: {loaderPhaseLabel(datasetLoadError.phase)}</li>
                 <li>Loader/runtime message: {datasetLoadError.message}</li>
-                <li>requestedPairIndexUrl: {datasetLoadError.diagnostics?.requestedUrl ?? "n/a"}</li>
-                <li>pairIndexResponseStatus: {datasetLoadError.diagnostics?.responseStatus ?? "n/a"}</li>
-                <li>pairIndexContentType: {datasetLoadError.diagnostics?.contentType ?? "n/a"}</li>
-                <li>pairIndexFirst80Chars: {datasetLoadError.diagnostics?.first80Chars ?? "n/a"}</li>
-                <li>pairIndexFileExistsAtBuildTime: {datasetLoadError.diagnostics?.fileExistsAtBuildTime === undefined ? "n/a" : String(datasetLoadError.diagnostics.fileExistsAtBuildTime)}</li>
+                <li>requestedUrl: {datasetLoadError.diagnostics?.requestedUrl ?? "n/a"}</li>
+                <li>responseStatus: {datasetLoadError.diagnostics?.responseStatus ?? "n/a"}</li>
+                <li>contentType: {datasetLoadError.diagnostics?.contentType ?? "n/a"}</li>
+                <li>first80Chars: {datasetLoadError.diagnostics?.first80Chars ?? "n/a"}</li>
+                <li>fileExistsAtBuildTime: {datasetLoadError.diagnostics?.fileExistsAtBuildTime === undefined ? "n/a" : String(datasetLoadError.diagnostics.fileExistsAtBuildTime)}</li>
+                <li>staticCheckUrl: {datasetLoadError.diagnostics?.staticCheckUrl ?? "n/a"}</li>
+                <li>staticCheckStatus: {datasetLoadError.diagnostics?.staticCheckStatus ?? "n/a"}</li>
+                <li>staticCheckContentType: {datasetLoadError.diagnostics?.staticCheckContentType ?? "n/a"}</li>
+                <li>staticCheckFirst80Chars: {datasetLoadError.diagnostics?.staticCheckFirst80Chars ?? "n/a"}</li>
               </ul>
             </div>
           </section>

@@ -12,6 +12,8 @@ import type {
 const MANIFEST_URL = '/preprocessed/manifest.json';
 const normalizeAssetPath = (value: string) => value.replace(/^\/+/, '');
 const normalizeAssetUrl = (value: string) => `/${normalizeAssetPath(value)}`;
+export const STATIC_HTML_REWRITE_MESSAGE =
+  'Static JSON asset was rewritten to HTML. Check SPA fallback/static asset configuration.';
 const sanitizeFirstChars = (value: string) => value.replace(/\s+/g, ' ').slice(0, 80);
 const isHtmlDocument = (value: string) => {
   const trimmed = value.trim().toLowerCase();
@@ -70,6 +72,40 @@ export class DatasetLoadError extends Error {
   }
 }
 
+const isHtmlContentType = (value?: string) => value?.toLowerCase().includes('text/html') ?? false;
+
+const buildStaticFetchDiagnostics = ({
+  url,
+  responseStatus,
+  contentType,
+  first80Chars,
+  diagnostics,
+}: {
+  url: string;
+  responseStatus: number;
+  contentType?: string;
+  first80Chars: string;
+  diagnostics?: Partial<DatasetFetchDiagnostics>;
+}): DatasetFetchDiagnostics => ({
+  ...diagnostics,
+  requestedUrl: url,
+  responseStatus,
+  contentType,
+  first80Chars,
+  staticCheckUrl: diagnostics?.staticCheckUrl ?? url,
+  staticCheckStatus: responseStatus,
+  staticCheckContentType: contentType,
+  staticCheckFirst80Chars: first80Chars,
+});
+
+const hasHtmlRewriteResponse = ({
+  contentType,
+  text,
+}: {
+  contentType?: string;
+  text: string;
+}) => isHtmlContentType(contentType) || isHtmlDocument(text);
+
 const loadJson = async <T,>({
   url,
   datasetId,
@@ -88,13 +124,13 @@ const loadJson = async <T,>({
   const contentType = response.headers.get('content-type') ?? undefined;
   const text = await response.text();
   const first80Chars = sanitizeFirstChars(text);
-  const fetchDiagnostics: DatasetFetchDiagnostics = {
-    ...diagnostics,
-    requestedUrl: url,
+  const fetchDiagnostics = buildStaticFetchDiagnostics({
+    url,
     responseStatus,
     contentType,
     first80Chars,
-  };
+    diagnostics,
+  });
 
   if (!response.ok) {
     throw new DatasetLoadError({
@@ -107,14 +143,13 @@ const loadJson = async <T,>({
     });
   }
 
-  if (isHtmlDocument(text)) {
+  if (hasHtmlRewriteResponse({ contentType, text })) {
     throw new DatasetLoadError({
       datasetId,
       datasetLabel,
       sourceLabel,
       phase: 'parse',
-      message:
-        'Expected JSON for pair index but received HTML. Likely missing static file or SPA rewrite fallback.',
+      message: STATIC_HTML_REWRITE_MESSAGE,
       diagnostics: fetchDiagnostics,
     });
   }
