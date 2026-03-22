@@ -5,7 +5,7 @@ import { extname, join, normalize, relative, resolve } from 'node:path';
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 4173);
 const root = resolve(process.cwd());
-const preprocessedRoots = [resolve(root, 'public/preprocessed'), resolve(root, 'dist/preprocessed')];
+const preprocessedRoots = [resolve(root, 'dist/preprocessed'), resolve(root, 'public/preprocessed')];
 
 const mime = {
   '.html': 'text/html; charset=utf-8',

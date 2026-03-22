@@ -455,6 +455,21 @@ const main = async () => {
       await mkdir(pairOutputRoot, { recursive: true });
       await mkdir(eventsRoot, { recursive: true });
 
+      const pairIndex = buildPairIndexPayload({
+        manifestGeneratedAt: manifest.generatedAt,
+        pair,
+        datasetId,
+        sourceLabel,
+        symbol: parsed.symbol,
+        candidateSummaries,
+        parseStatus: parsed.parseStatus,
+        parseErrors: parsed.parseErrors,
+        parseDiagnostics: parsed.parseDiagnostics,
+      });
+      // Emit index.json before event generation so build/deploy validation can detect
+      // the pair folder as soon as candidate discovery succeeds.
+      await writeFile(getPairIndexFilePath(pair.pairKey), `${JSON.stringify(pairIndex)}\n`, 'utf8');
+
       for (const candidate of candidateSummaries) {
         const eventWindow = sliceEventWindow(parsed.bars1m, candidate.candidateDate);
         const precomputedTimeframeBars = slicePrecomputedTimeframeBars(fullTimeframeBars, eventWindow.windowDays);
@@ -481,19 +496,6 @@ const main = async () => {
         };
         await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload)}\n`, 'utf8');
       }
-
-      const pairIndex = buildPairIndexPayload({
-        manifestGeneratedAt: manifest.generatedAt,
-        pair,
-        datasetId,
-        sourceLabel,
-        symbol: parsed.symbol,
-        candidateSummaries,
-        parseStatus: parsed.parseStatus,
-        parseErrors: parsed.parseErrors,
-        parseDiagnostics: parsed.parseDiagnostics,
-      });
-      await writeFile(getPairIndexFilePath(pair.pairKey), `${JSON.stringify(pairIndex)}\n`, 'utf8');
       const wroteIndex = await pathExists(getPairIndexFilePath(pair.pairKey));
       if (!wroteIndex) {
         throw new Error(`Failed to write ${toRepoRelativePath(getPairIndexFilePath(pair.pairKey))}.`);
