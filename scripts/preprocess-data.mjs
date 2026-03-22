@@ -320,6 +320,47 @@ const verifyOfficialManifestIntegrity = async (manifest) => {
   }
 };
 
+const buildPairIndexPayload = ({
+  manifestGeneratedAt,
+  pair,
+  datasetId,
+  sourceLabel,
+  symbol,
+  candidateSummaries,
+  parseStatus = 'success',
+  parseErrors = [],
+  parseDiagnostics = [],
+}) => {
+  const indexPath = getPairIndexWebPath(pair.pairKey);
+  return {
+    diagnostics: {
+      generatedAt: manifestGeneratedAt,
+      candidateCount: candidateSummaries.length,
+      eventFileCount: candidateSummaries.length,
+      indexPath,
+      eventsPath: toWebPath(pair.pairKey, 'events'),
+      parseStatus,
+      parseErrorCount: parseErrors.length,
+      parseDiagnostics,
+    },
+    pairId: datasetId,
+    pairLabel: pair.displayName,
+    sourceLabel,
+    datasetVersion: DATASET_VERSION,
+    pairKey: pair.pairKey,
+    folderName: pair.pairKey,
+    symbol,
+    candidates: candidateSummaries.map(({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath }) => ({
+      eventId,
+      candidateDate,
+      template,
+      shortSummary,
+      practiceStatus,
+      datasetPath,
+    })),
+  };
+};
+
 const main = async () => {
   let discoveredCsvFiles = [];
   const outputRootExists = await pathExists(outputRoot);
@@ -400,13 +441,14 @@ const main = async () => {
     const datasetId = `pair:${pair.pairKey}`;
     const sourcePath = pair.sourcePath;
     const sourceLabel = toRepoRelativePath(sourcePath);
+    const pairOutputRoot = path.join(outputRoot, pair.pairKey);
+    const eventsRoot = path.join(pairOutputRoot, 'events');
+    const indexPath = getPairIndexWebPath(pair.pairKey);
     try {
       const raw = await readFile(sourcePath, 'utf8');
       const parsed = parseRawCsvDataset({ datasetId, label: pair.displayName, sourceLabel, raw });
       const candidateSummaries = buildCandidateSummaries(parsed, pair.pairKey);
       const fullTimeframeBars = buildTimeframeBarMap(parsed.bars1m);
-      const pairOutputRoot = path.join(outputRoot, pair.pairKey);
-      const eventsRoot = path.join(pairOutputRoot, 'events');
       // Invariant: every official pair always emits public/preprocessed/<pair>/index.json,
       // even when candidateCount === 0. Create the pair directory up front so the
       // advertised manifest indexPath always has a concrete on-disk target.
@@ -440,47 +482,39 @@ const main = async () => {
         await writeFile(path.join(eventsRoot, `${candidate.eventId}.json`), `${JSON.stringify(eventPayload)}\n`, 'utf8');
       }
 
-      const indexPath = getPairIndexWebPath(pair.pairKey);
-      const pairIndex = {
-        diagnostics: {
-          generatedAt: manifest.generatedAt,
-          candidateCount: candidateSummaries.length,
-          eventFileCount: candidateSummaries.length,
-          indexPath,
-          eventsPath: toWebPath(pair.pairKey, 'events'),
-        },
-        pairId: datasetId,
-        pairLabel: pair.displayName,
+      const pairIndex = buildPairIndexPayload({
+        manifestGeneratedAt: manifest.generatedAt,
+        pair,
+        datasetId,
         sourceLabel,
-        datasetVersion: DATASET_VERSION,
-        pairKey: pair.pairKey,
-        folderName: pair.pairKey,
         symbol: parsed.symbol,
-        candidates: candidateSummaries.map(({ eventId, candidateDate, template, shortSummary, practiceStatus, datasetPath }) => ({
-          eventId,
-          candidateDate,
-          template,
-          shortSummary,
-          practiceStatus,
-          datasetPath,
-        })),
-      };
+        candidateSummaries,
+        parseStatus: parsed.parseStatus,
+        parseErrors: parsed.parseErrors,
+        parseDiagnostics: parsed.parseDiagnostics,
+      });
       await writeFile(getPairIndexFilePath(pair.pairKey), `${JSON.stringify(pairIndex)}\n`, 'utf8');
+      const wroteIndex = await pathExists(getPairIndexFilePath(pair.pairKey));
+      if (!wroteIndex) {
+        throw new Error(`Failed to write ${toRepoRelativePath(getPairIndexFilePath(pair.pairKey))}.`);
+      }
 
       const barsByDay = groupByNyDate(parsed.bars1m);
       const allDays = Object.keys(barsByDay).sort();
-      manifest.pairs.push({
-        id: datasetId,
-        label: pair.displayName,
-        sourceLabel,
-        indexPath,
-        candidateCount: candidateSummaries.length,
-        dateRange: allDays.length ? { start: allDays[0], end: allDays[allDays.length - 1] } : null,
-        datasetVersion: DATASET_VERSION,
-        pairKey: pair.pairKey,
-        folderName: pair.pairKey,
-        symbol: parsed.symbol,
-      });
+      if (wroteIndex) {
+        manifest.pairs.push({
+          id: datasetId,
+          label: pair.displayName,
+          sourceLabel,
+          indexPath,
+          candidateCount: candidateSummaries.length,
+          dateRange: allDays.length ? { start: allDays[0], end: allDays[allDays.length - 1] } : null,
+          datasetVersion: DATASET_VERSION,
+          pairKey: pair.pairKey,
+          folderName: pair.pairKey,
+          symbol: parsed.symbol,
+        });
+      }
       manifest.diagnostics.preprocessingSucceededPairs.push(pair.pairKey);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
