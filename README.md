@@ -46,7 +46,7 @@ npm run dev
 
 `npm run dev` 會先自動執行 `npm run preprocess:data`，再啟動 Vite。
 
-Vite 設定已明確固定：`publicDir = "public"`、`build.outDir = "dist"`。正式 replay JSON 固定從 repo 的 `public/preprocessed/` 複製到 build 後的 `dist/preprocessed/`，並在瀏覽器固定以 `/preprocessed/**` 存取。
+Vite 設定已明確固定：`publicDir = "public"`、`build.outDir = "dist"`。`npm run build` 會先執行 preprocessing，再跑 `vite build`，最後用 `scripts/copy-dist-preprocessed.mjs` 明確把 repo 的 `public/preprocessed/` 複製到 build 後的 `dist/preprocessed/`，並驗證 `dist/preprocessed/manifest.json` 與四個 official pair 的 `dist/preprocessed/<pair>/index.json` 都存在，確保部署時真正從 `dist/` 提供正式 JSON。
 
 本機 `vite dev` / `vite preview` 也會在 middleware 中顯式 mount `/preprocessed` 到實際的 `public/preprocessed/` 目錄，避免資料請求誤走 SPA fallback。
 
@@ -76,9 +76,10 @@ npm run preprocess:data
 5. 針對每個候選事件寫出 `public/preprocessed/<pair-slug>/events/<eventId>.json`，其中包含 1m 與預先計算的 5m / 15m / 1h / 4h / 1D bars
 6. manifest `indexPath` 與 candidate `datasetPath` 一律寫成 `/preprocessed/<pair>/...` 對應的 runtime web path；不要混用其他輸出位置
 7. official manifest 產出後，會額外驗證 manifest 內列出的每個 `index.json` 都實際存在且可讀，並驗證 index 內宣告的每個 `events/<eventId>.json` 都實際存在；`candidateCount = 0` 的 pair 只要求空 `index.json` 可讀，不要求 event JSON
-8. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
-9. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
-10. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
+8. `npm run build` 在 `vite build` 後會再次把 `public/preprocessed/` 明確複製到 `dist/preprocessed/`，並至少驗證 `dist/preprocessed/manifest.json` 與四個 official pair 的 `dist/preprocessed/<pair>/index.json` 都存在，避免部署時誤從 repo root 或其他目錄提供資料
+9. 若缺任何 official pair，preprocessing 會報錯；app 會阻止 official replay，且不會 fallback 到 sample-1m
+10. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
+11. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
 
 ## Pair switching
 

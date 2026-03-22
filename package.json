@@ -8,7 +8,7 @@
     "predev": "npm run preprocess:data",
     "dev": "vite --host 127.0.0.1 --port 4173",
     "prebuild": "npm run preprocess:data",
-    "build": "npm run check && vite build",
+    "build": "npm run check && vite build && node scripts/copy-dist-preprocessed.mjs",
     "check": "tsc -p tsconfig.app.json --noEmit",
     "test": "node scripts/run-unified-scoring-tests.mjs",
     "preprocess:data": "node scripts/preprocess-data.mjs",
