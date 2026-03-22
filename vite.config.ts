@@ -15,6 +15,12 @@ const isPathInsideRoot = (candidatePath: string, rootPath: string) => {
   return relativePath !== '' && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
 };
 
+const respondNotFound = (res: Connect.ServerResponse) => {
+  res.statusCode = 404;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.end('Not Found');
+};
+
 const preprocessedStaticMiddleware = (): Connect.NextHandleFunction => (req, res, next) => {
   const requestUrl = req.url;
   if (!requestUrl) {
@@ -32,7 +38,7 @@ const preprocessedStaticMiddleware = (): Connect.NextHandleFunction => (req, res
     .slice(PREPROCESSED_ROUTE.length)
     .replace(/^\/+/, '')
     .trim();
-  const resolvedAssetPath = path.resolve(PREPROCESSED_OUTPUT_DIR, relativeAssetPath || 'index.html');
+  const resolvedAssetPath = path.resolve(PREPROCESSED_OUTPUT_DIR, relativeAssetPath);
 
   if (
     resolvedAssetPath !== PREPROCESSED_OUTPUT_DIR &&
@@ -47,12 +53,12 @@ const preprocessedStaticMiddleware = (): Connect.NextHandleFunction => (req, res
   try {
     stat = fs.statSync(resolvedAssetPath);
   } catch {
-    next();
+    respondNotFound(res);
     return;
   }
 
   if (stat.isDirectory()) {
-    next();
+    respondNotFound(res);
     return;
   }
 
