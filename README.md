@@ -1,6 +1,6 @@
-# Stacey Reply Replay
+# Stacey Reply Practice
 
-TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 chart reply / replay 工具，不是靜態 K 線檢視器。
+TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 chart practice / reply 工具，不是靜態 K 線檢視器。
 
 ## Confirmed features
 
@@ -22,14 +22,14 @@ TypeScript 單頁 web app，定位為 Stacey Burke / Sniper 風格的 Day 3 char
 - FGD / FRD / FRD_INSIDE 已重構為單一 `Unified Signal-Day Scoring Engine`：共用 hard gates、weighted features、0-100 score、score band，以及 `score >= 75` 才允許 strategy entry 的規則
 - pair validation 與三處同步錯誤顯示（狀態列 / Explain Panel / Diagnostics）
 - Pause / Auto Replay / Semi Replay
-- Replay mode（Pause / Auto Replay / Semi Replay）與 Reply mode（Auto Reply / Manual Reply）分離，避免把播放方式與交易/練習模式混用
+- Play mode（Pause / Auto Play / Step by stage）與 Reply mode（Auto Reply / Manual Reply）分離，避免把播放方式與交易/練習模式混用
 - Auto Reply / Manual Reply 交易模式切換，顯示 current position、last trade result、cumulative PnL
-- Candidate list filter 可獨立切換 `Show all scanned days` / `Show needs-practice only`，不再綁定 replay 播放模式
+- Date list 可獨立切換 `All scanned days` / `Needs practice only`，不再綁定 replay 播放模式
 - Manual Reply 明確提供 Enter Long / Enter Short / Exit / Reset Trade，且 entry gate 直接綁定 `analysis.lastReplyEval`
 - Manual Reply 的 entry 語義已統一：可明確選擇使用 strategy `candidateEntryPrice` / `confirmedEntryPrice`、user-specified execution price、或 current bar close；當 hard gate 未通過時 UI 只顯示 candidate entry only / blocked entry basis，不再誤顯示 strategy-confirmed entry；Explain Panel / Trade ledger / Diagnostics 會分開顯示 candidate entry、confirmed entry 與 manual execution price，並讓 target ladder / stop distance / cumulative PnL 對齊同一組 entry basis
 - Auto Reply 會依策略事件自動建立 entry/exit，並以共用 PnL 計算器更新 realized / cumulative PnL
-- Explain Panel 提供 timeline + current reasoning + missing conditions + rule trace
-- Chart / Debug Page 會即時顯示 current score、score band、hard gates、category breakdown、top positive features、missing high-value features、以及 entry blocked 原因
+- Explain panel 提供 setup path + current reasoning + missing conditions + rule trace
+- Chart / Debug Tools 會即時顯示 current score、score band、hard gates、category breakdown、top positive features、missing high-value features、以及 entry blocked 原因
 - TP30 / TP35 / TP40 / TP50 目標梯級會依 actual trade mode 或 blocked/hypothetical 狀態顯示；若 entry blocked，不再把 target 標成真實 hit，並會列出下一個 upgrade gate
 - sample-1m 若保留，只能屬於 sample/demo 流程，並固定輸出到 `public/preprocessed-sample/`；正式 pair selector 與正式資料載入流程不再 fallback 到 sample-1m
 - 圖表 X 軸顯示 normalized New York 時間字串，tooltip 同時保留 source/raw time 供對照
@@ -81,10 +81,10 @@ npm run preprocess:data
 10. sample mode 若保留，必須維持獨立資料來源，並使用 `public/preprocessed-sample/manifest.json` 與對應 event 輸出，不可混入 official manifest
 11. app 再用 manifest → pair index → explicit candidate selection → single event dataset 的順序載入
 
-## Pair switching
+## Pair and date picking
 
 - 左上 `Pair` 下拉選單只顯示 `EURUSD` / `USDCAD` / `GBPUSD` / `AUDUSD`
-- `Candidate Day 3` 會列出該 pair 掃描出的候選日期，而不是把整個 replay payload 直接當成單一 trade day
+- `Detected Day 3 date` 會列出該 pair 掃描出的候選日期，而不是把整個 event payload 直接當成單一 trade day
 - 正式流程不再使用 sample-1m；若未來保留 sample mode，必須使用 `public/preprocessed-sample/` 並與正式 pair selector 分離
 - 不再顯示單檔 / 資料夾 / JSON 上傳流程；可用 pair 完全由預處理 manifest 決定，而候選事件由 pair index 驅動；pair 切換本身不會預先把全部 bars 載入
 
@@ -95,15 +95,15 @@ npm run preprocess:data
 - 顯示與 session 邏輯使用 `America/New_York`
 - 若來源為 MT fixed EST，UI 會同時保留 source/raw time 供對照，並以 normalized strategy time 作為主要策略時間
 
-## Replay controls
+## Play controls
 
-### Auto Replay
+### Auto Play
 
 - 從 Day 3 replay 起點自動播放
 - 仍會在關鍵事件對應的 stage banner 更新
 - 用來驗證整段流程是否能走到 entry / TP / stop / dataset end
 
-### Semi Replay
+### Step by stage
 
 - 不是每根 K 棒停，而是每個策略 stage 停
 - 按 `Continue / Next step` 只跳到下一個 stage stop
@@ -127,8 +127,8 @@ npm run preprocess:data
 這些訊息會同步出現在：
 
 - 圖表上方狀態列
-- 右側 Explain Panel
-- 下方 Diagnostics
+- 右側 Why this setup
+- 下方 Data checks
 
 ## Accepted parser formats
 

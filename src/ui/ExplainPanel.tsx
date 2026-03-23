@@ -41,30 +41,30 @@ export function ExplainPanel({
 
   return (
     <aside className="explain-shell">
-      <h2>Explain Panel</h2>
+      <h2>Why this setup</h2>
       <section>
-        <h3>Current Classification</h3>
+        <h3>Current read</h3>
         <ul>
           <li>Template: {analysis.unifiedStrategy.templateType ?? analysis.template}</li>
           <li>Direction: {analysis.unifiedStrategy.direction}</li>
           <li>Band: {analysis.unifiedStrategy.scoreBand}</li>
           <li>Score: {analysis.unifiedStrategy.score}/100</li>
-          <li>Entry allowed: {analysis.unifiedStrategy.entryAllowed ? "Yes" : "No"}</li>
-          <li>Why: {analysis.unifiedStrategy.entryReason}</li>
-          <li>Current stage: {analysis.stage}</li>
-          <li>Why source: {analysis.unifiedStrategy.hardGates.find((gate) => gate.key === "sourceLocationValid")?.reason}</li>
-          <li>Why stop hunt: {analysis.unifiedStrategy.weightedFeatures.find((feature) => feature.key === "stopHuntSeen")?.active ? "Stop hunt adds score." : "Stop hunt missing, but it is not a blocking prerequisite."}</li>
-          <li>Why 123: {analysis.unifiedStrategy.weightedFeatures.find((feature) => feature.key === "pattern123Seen")?.active ? "123 pattern adds score." : "123 pattern missing, but it is not a blocking prerequisite."}</li>
-          <li>Why entry: {analysis.unifiedStrategy.hardGates.find((gate) => gate.key === "emaEntryValid")?.reason}</li>
-          <li>Why current target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "No target unlocked because entry is blocked."}</li>
-          <li>Manual entry UI: {manualEntrySummary}</li>
-          <li>Entry gate open: {entryGateOpen ? "true" : "false"}</li>
-          <li>Pending entry basis: {entrySemanticsLabel(pendingEntrySemantics)} @ {formatPrice(pendingEntryPrice)}</li>
-          <li>Candidate entry price: {formatPrice(analysis.candidateEntryPrice)}</li>
-          <li>Confirmed entry price: {formatPrice(analysis.confirmedEntryPrice)}</li>
-          <li>Entry display mode: {analysis.confirmedEntryPrice !== undefined ? "strategy-confirmed entry" : "candidate entry only / blocked entry basis"}</li>
-          <li>Manual execution price: {formatPrice(tradeState.currentPosition?.manualExecutionPrice ?? pendingEntryPrice)}</li>
-          <li>Trade PnL basis entry: {formatPrice(tradeState.currentPosition?.entryPrice ?? pendingEntryPrice ?? analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice)}</li>
+          <li>Entry ready: {analysis.unifiedStrategy.entryAllowed ? "Yes" : "No"}</li>
+          <li>Why now: {analysis.unifiedStrategy.entryReason}</li>
+          <li>Stage: {analysis.stage}</li>
+          <li>Source: {analysis.unifiedStrategy.hardGates.find((gate) => gate.key === "sourceLocationValid")?.reason}</li>
+          <li>Stop hunt: {analysis.unifiedStrategy.weightedFeatures.find((feature) => feature.key === "stopHuntSeen")?.active ? "Adds score." : "Missing, but not a blocker."}</li>
+          <li>123: {analysis.unifiedStrategy.weightedFeatures.find((feature) => feature.key === "pattern123Seen")?.active ? "Adds score." : "Missing, but not a blocker."}</li>
+          <li>Entry: {analysis.unifiedStrategy.hardGates.find((gate) => gate.key === "emaEntryValid")?.reason}</li>
+          <li>Target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "No target yet because entry is blocked."}</li>
+          <li>Manual entry: {manualEntrySummary}</li>
+          <li>Gate open: {entryGateOpen ? "true" : "false"}</li>
+          <li>Pending entry: {entrySemanticsLabel(pendingEntrySemantics)} @ {formatPrice(pendingEntryPrice)}</li>
+          <li>Candidate entry: {formatPrice(analysis.candidateEntryPrice)}</li>
+          <li>Confirmed entry: {formatPrice(analysis.confirmedEntryPrice)}</li>
+          <li>Entry view: {analysis.confirmedEntryPrice !== undefined ? "confirmed strategy entry" : "candidate only / blocked basis"}</li>
+          <li>Manual execution: {formatPrice(tradeState.currentPosition?.manualExecutionPrice ?? pendingEntryPrice)}</li>
+          <li>PnL entry basis: {formatPrice(tradeState.currentPosition?.entryPrice ?? pendingEntryPrice ?? analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice)}</li>
         </ul>
       </section>
       <section>
@@ -84,7 +84,7 @@ export function ExplainPanel({
         </ul>
       </section>
       <section>
-        <h3>Historical Reasoning Timeline</h3>
+        <h3>Setup path</h3>
         <ol>
           {visibleEvents.map((event) => (
             <li key={event.id}>
@@ -96,17 +96,17 @@ export function ExplainPanel({
         </ol>
       </section>
       <section>
-        <h3>Diagnostics</h3>
+        <h3>Data checks</h3>
         <ul>
-          <li>Status banner: {analysis.statusBanner}</li>
-          <li>Can reply: {analysis.lastReplyEval.canReply ? "true" : "false"}</li>
-          <li>Replay source/raw time: {sourceTimeText(replayBar)}</li>
-          <li>Replay normalized strategy time: {normalizedTimeText(replayBar)}</li>
-          <li>DST adjustment applied: {dstAdjusted ? "yes" : "no"}</li>
+          <li>Status: {analysis.statusBanner}</li>
+          <li>Can enter: {analysis.lastReplyEval.canReply ? "true" : "false"}</li>
+          <li>Source time: {sourceTimeText(replayBar)}</li>
+          <li>Strategy time: {normalizedTimeText(replayBar)}</li>
+          <li>DST adjusted: {dstAdjusted ? "yes" : "no"}</li>
         </ul>
       </section>
       <section>
-        <h3>Rule Trace</h3>
+        <h3>Rule trace</h3>
         <div className="trace-list">
           {visibleTraces.map((trace, index) => (
             <div key={`${trace.ruleName}-${index}`} className="trace-card">

@@ -38,7 +38,7 @@ import { ExplainPanel } from "./ui/ExplainPanel";
 const tfs: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1D"];
 const speedOptions = [150, 400, 800];
 const datasetImportMessage =
-  "App startup only reads preprocessed/manifest.json. Official pair selection only reads that pair index.json. Candidate selection then lazily loads a single events/<eventId>.json payload without falling back to sample-1m.";
+  "App startup reads preprocessed/manifest.json first. After you pick a pair, the app reads only that pair's index.json, then loads one events/<eventId>.json window for the selected date. No sample-1m fallback.";
 
 const replyModeLabel = (mode: ReplayPnLState["mode"]) =>
   mode === "auto" ? "Auto Reply" : "Manual Reply";
@@ -61,7 +61,7 @@ const formatTradeResult = (trade: TradeExecution | null) => {
   return `${label} ${trade.side.toUpperCase()} ${formatPnL(trade.realizedPnL)}${exitReason}`;
 };
 const resetTradeState = (mode: ReplayPnLState["mode"]) => createReplayPnLState(mode);
-const describeSourceType = () => "Preprocessed replay library";
+const describeSourceType = () => "Preprocessed practice library";
 const datasetLabelText = (dataset: DatasetManifestItem) => dataset.label.toUpperCase();
 const loaderPhaseLabel = (phase: DatasetLoadErrorInfo["phase"]) => {
   if (phase === "file-read") return "file read";
@@ -590,12 +590,12 @@ export default function App() {
   const selectedCandidateOption =
     visibleCandidateTradeDays.find((candidate) => candidate.eventId === selectedEventId)?.eventId ?? "";
   const infoStripMessage = (() => {
-    if (isDatasetLoading) return "Loading preprocessed data…";
+    if (isDatasetLoading) return "Loading practice data…";
     if (datasetLoadError) return "Event payload missing or malformed";
     if (!pairIndex) return "Waiting for pair index";
-    if (pairIndex.candidates.length === 0) return "No candidate events found for this pair";
-    if (!selectedCandidate) return `Pair index loaded: ${pairIndex.candidates.length} candidates found`;
-    if (!activeDataset) return `Candidate selected: ${selectedCandidate.eventId}`;
+    if (pairIndex.candidates.length === 0) return "No detected dates found for this pair";
+    if (!selectedCandidate) return `Date list ready: ${pairIndex.candidates.length} dates found`;
+    if (!activeDataset) return `Date selected: ${selectedCandidate.eventId}`;
     return "Event payload loaded successfully";
   })();
 
@@ -603,19 +603,19 @@ export default function App() {
     return (
       <div className="app-shell">
         <header>
-          <h1>Stacey Reply Replay</h1>
-          <p>Fixed `data/` replay pipeline with pair selection, index-only pair switching, and explicit event payload loading. No broker API.</p>
+          <h1>Stacey Reply Practice</h1>
+          <p>Fixed `data/` practice flow with pair selection, date-first loading, and one event file at a time. No broker API.</p>
         </header>
         <section className="upload-grid">
           <div className="upload-card">
-            <h3>Replay dataset flow</h3>
+            <h3>Practice data flow</h3>
             <p>{datasetImportMessage}</p>
             <p className="upload-note">Fixed `data/` raw CSV → preprocessing → manifest → pair index → explicit event selection → single event load.</p>
           </div>
         </section>
         <section className="control-grid">
-          <button className={page === "replay" ? "active-toggle" : ""} onClick={() => setPage("replay")}>Replay Page</button>
-          <button className={page === "debug" ? "active-toggle" : ""} onClick={() => setPage("debug")}>Debug Page</button>
+          <button className={page === "replay" ? "active-toggle" : ""} onClick={() => setPage("replay")}>Practice Page</button>
+          <button className={page === "debug" ? "active-toggle" : ""} onClick={() => setPage("debug")}>Debug Tools</button>
           <label>
             Pair
             <select value={datasetId} onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}>
@@ -625,7 +625,7 @@ export default function App() {
             </select>
           </label>
           <label>
-            Candidate Day 3
+            Detected Day 3 date
             <select
               value={selectedCandidateOption}
               onChange={(e: { target: { value: string } }) => setSelectedEventId(e.target.value)}
@@ -633,10 +633,10 @@ export default function App() {
             >
               <option value="">
                 {!pairIndex
-                  ? "Wait for pair index to load"
+                  ? "Loading detected dates…"
                   : visibleCandidateTradeDays.length
-                    ? "Choose a candidate event to load"
-                    : "No candidate events available"}
+                    ? "Choose a detected date"
+                    : "No detected dates available"}
               </option>
               {visibleCandidateTradeDays.map((candidate) => (
                 <option key={candidate.eventId} value={candidate.eventId}>
@@ -649,23 +649,23 @@ export default function App() {
         {!hasCompleteOfficialManifest ? (
           <section className="info-strip">
             <div>Missing official pair(s): {missingOfficialPairs.join(", ") || "unknown"}</div>
-            <div>Official replay is blocked until the official manifest contains exactly EURUSD, USDCAD, GBPUSD, and AUDUSD.</div>
+            <div>Official practice mode is blocked until the official manifest contains exactly EURUSD, USDCAD, GBPUSD, and AUDUSD.</div>
           </section>
         ) : null}
         <section className="info-strip">
           <div>{infoStripMessage}</div>
-          <div>Dataset source: {selectedDataset ? describeSourceType() : "none"}</div>
+          <div>Data source: {selectedDataset ? describeSourceType() : "none"}</div>
           {!isDatasetLoading && pairIndex?.candidates.length === 0 ? (
-            <div>No candidate events found for this pair. Rerun preprocessing or inspect {selectedDataset?.indexPath}.</div>
+            <div>No detected dates found for this pair. Rerun preprocessing or inspect {selectedDataset?.indexPath}.</div>
           ) : null}
           {!isDatasetLoading && datasetLoadError ? (
-            <div>Why unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}</div>
+            <div>Why it is unavailable: {loaderPhaseLabel(datasetLoadError.phase)} failure — {datasetLoadError.message}</div>
           ) : null}
         </section>
         {!isDatasetLoading && datasetLoadError ? (
           <section className="footer-grid">
             <div>
-              <h3>Diagnostics</h3>
+              <h3>Data checks</h3>
               {hasStaticAssetRewriteDiagnostics(datasetLoadError) ? (
                 <>
                   <p><strong>{STATIC_HTML_REWRITE_MESSAGE}</strong></p>
@@ -676,7 +676,7 @@ export default function App() {
                 <li>Dataset: {datasetLoadError.datasetLabel}</li>
                 <li>Dataset id: {datasetLoadError.datasetId}</li>
                 <li>Dataset file: {datasetLoadError.sourceLabel}</li>
-                <li>Dataset source: {describeSourceType()}</li>
+                <li>Data source: {describeSourceType()}</li>
                 <li>Load failure phase: {loaderPhaseLabel(datasetLoadError.phase)}</li>
                 <li>Loader/runtime message: {datasetLoadError.message}</li>
                 <li>requestedUrl: {datasetLoadError.diagnostics?.requestedUrl ?? "n/a"}</li>
@@ -752,11 +752,11 @@ export default function App() {
   const manualEntryConfigSummary =
     manualEntryMode === "strategy"
       ? analysis.confirmedEntryPrice !== undefined
-        ? `Strategy-confirmed entry ${formatPrice(analysis.confirmedEntryPrice)}.`
+        ? `Confirmed strategy entry ${formatPrice(analysis.confirmedEntryPrice)}.`
         : `Candidate entry only ${formatPrice(analysis.candidateEntryPrice)} — blocked until hard gates pass.`
       : manualEntryMode === "user"
         ? `User-specified execution price ${hasManualEntryInput ? formatPrice(parsedManualEntryInput) : "required"}.`
-        : `Current 1m bar close ${formatPrice(current1mBar?.close)}.`;
+        : `Current 1m close ${formatPrice(current1mBar?.close)}.`;
   const activeEntryReferencePrice =
     tradeState.currentPosition?.entryPrice ?? resolvedEntryConfig.entryPrice ?? analysis.confirmedEntryPrice ?? analysis.candidateEntryPrice;
   const effectiveTargetLevels = analysis.targetLevels.map((level) => {
@@ -841,19 +841,19 @@ export default function App() {
   return (
     <div className="app-shell">
       <header>
-        <h1>Stacey Reply Replay</h1>
-        <p>Fixed `data/` replay pipeline with pair selection, index-only pair switching, and explicit event payload loading. No broker API.</p>
+        <h1>Stacey Reply Practice</h1>
+        <p>Fixed `data/` practice flow with pair selection, date-first loading, and one event file at a time. No broker API.</p>
       </header>
       <section className="upload-grid">
         <div className="upload-card">
-          <h3>Replay dataset flow</h3>
+          <h3>Practice data flow</h3>
           <p>{datasetImportMessage}</p>
-          <p className="upload-note">Datasets arrive from the fixed `data/` preprocessing flow, then load pair index first and fetch bars only after explicit event selection.</p>
+          <p className="upload-note">Data follows the fixed `data/` preprocessing flow: choose a pair, review detected dates, then load one date window only when selected.</p>
         </div>
       </section>
       <section className="control-grid">
-        <button className={page === "replay" ? "active-toggle" : ""} onClick={() => setPage("replay")}>Replay Page</button>
-        <button className={page === "debug" ? "active-toggle" : ""} onClick={() => setPage("debug")}>Debug Page</button>
+        <button className={page === "replay" ? "active-toggle" : ""} onClick={() => setPage("replay")}>Practice Page</button>
+        <button className={page === "debug" ? "active-toggle" : ""} onClick={() => setPage("debug")}>Debug Tools</button>
         <label>
           Pair
           <select value={datasetId} onChange={(e: { target: { value: string } }) => setDatasetId(e.target.value)}>
@@ -863,13 +863,13 @@ export default function App() {
           </select>
         </label>
         <label>
-          Candidate Day 3
+          Detected Day 3 date
           <select
             value={selectedCandidateOption}
             onChange={(e: { target: { value: string } }) => setSelectedEventId(e.target.value)}
             disabled={candidateDropdownDisabled}
           >
-            <option value="">Choose candidate event</option>
+            <option value="">Choose a detected date</option>
             {visibleCandidateTradeDays.length ? (
               visibleCandidateTradeDays.map((candidate) => (
                 <option key={candidate.eventId} value={candidate.eventId}>
@@ -877,7 +877,7 @@ export default function App() {
                 </option>
               ))
             ) : (
-              <option value="">No scanned candidates for current pair</option>
+              <option value="">No scanned dates for this pair</option>
             )}
           </select>
         </label>
@@ -890,25 +890,25 @@ export default function App() {
           </select>
         </label>
         <label>
-          Replay mode
+          Play mode
           <select value={mode} onChange={(e: { target: { value: string } }) => setMode(e.target.value as ReplayMode)}>
             <option value="pause">Pause</option>
-            <option value="auto">Auto Replay</option>
-            <option value="semi">Semi Replay</option>
+            <option value="auto">Auto Play</option>
+            <option value="semi">Step by stage</option>
           </select>
         </label>
         <label>
-          Trade / practice mode
+          Reply mode
           <select value={tradeState.mode} onChange={(e: { target: { value: string } }) => setReplyMode(e.target.value as ReplayPnLState["mode"])}>
             <option value="auto">Auto Reply</option>
             <option value="manual">Manual Reply</option>
           </select>
         </label>
         <label>
-          Candidate list filter
+          Date list
           <select value={practiceFilterEnabled ? "needs-practice" : "all"} onChange={(e: { target: { value: string } }) => setPracticeFilterEnabled(e.target.value === "needs-practice")}>
-            <option value="all">Show all scanned days</option>
-            <option value="needs-practice">Show needs-practice only</option>
+            <option value="all">All scanned days</option>
+            <option value="needs-practice">Needs practice only</option>
           </select>
         </label>
         <label>
@@ -919,22 +919,22 @@ export default function App() {
             ))}
           </select>
         </label>
-        <button onClick={resetReplay}>Reset</button>
-        <button onClick={() => setReplayBehavior("auto")}>Auto Replay</button>
-        <button onClick={() => setReplayBehavior("semi")}>Semi Replay</button>
-        <button onClick={continueNextStep}>Continue / Next step</button>
+        <button onClick={resetReplay}>Reset view</button>
+        <button onClick={() => setReplayBehavior("auto")}>Auto Play</button>
+        <button onClick={() => setReplayBehavior("semi")}>Step by stage</button>
+        <button onClick={continueNextStep}>Continue / Next stage</button>
       </section>
       <section className="control-grid">
-        <button onClick={() => openManualTrade("long")} disabled={manualTradeDisabled || manualSide === "short" || !entryGateOpen || !manualEntryPriceReady}>Enter Long</button>
-        <button onClick={() => openManualTrade("short")} disabled={manualTradeDisabled || manualSide === "long" || !entryGateOpen || !manualEntryPriceReady}>Enter Short</button>
-        <button onClick={exitManualTrade} disabled={tradeState.mode !== "manual" || !tradeState.currentPosition}>Exit</button>
-        <button onClick={() => setTradeState((prev) => resetTradeState(prev.mode))}>Reset Trade</button>
+        <button onClick={() => openManualTrade("long")} disabled={manualTradeDisabled || manualSide === "short" || !entryGateOpen || !manualEntryPriceReady}>Buy</button>
+        <button onClick={() => openManualTrade("short")} disabled={manualTradeDisabled || manualSide === "long" || !entryGateOpen || !manualEntryPriceReady}>Sell</button>
+        <button onClick={exitManualTrade} disabled={tradeState.mode !== "manual" || !tradeState.currentPosition}>Close trade</button>
+        <button onClick={() => setTradeState((prev) => resetTradeState(prev.mode))}>Reset trade</button>
         <label>
-          Manual entry basis
+          Manual entry price
           <select value={manualEntryMode} onChange={(e: { target: { value: string } }) => setManualEntryMode(e.target.value as ManualEntryMode)} disabled={tradeState.mode !== "manual" || tradeState.currentPosition !== null}>
             {manualEntryModeOptions.map((option) => (
               <option key={option} value={option}>
-                {option === "strategy" ? "Strategy entry" : option === "user" ? "User-specified price" : "Current bar close"}
+                {option === "strategy" ? "Strategy entry" : option === "user" ? "Your price" : "Current bar close"}
               </option>
             ))}
           </select>
@@ -949,28 +949,28 @@ export default function App() {
       {!hasCompleteOfficialManifest ? (
         <section className="info-strip">
           <div>Missing official pair(s): {missingOfficialPairs.join(", ") || "unknown"}</div>
-          <div>Official replay is blocked until the official manifest contains exactly EURUSD, USDCAD, GBPUSD, and AUDUSD.</div>
+          <div>Official practice mode is blocked until the official manifest contains exactly EURUSD, USDCAD, GBPUSD, and AUDUSD.</div>
         </section>
       ) : null}
       <section className="info-strip">
-        <div>Dataset status: {isDatasetLoading ? "loading" : "ready"}</div>
-        <div>Dataset source: {describeSourceType()}</div>
+        <div>Data status: {isDatasetLoading ? "loading" : "ready"}</div>
+        <div>Data source: {describeSourceType()}</div>
         <div>Parse status: {activeDataset.parseStatus}</div>
-        <div>Trade day: {analysis.selectedTradeDay}</div>
+        <div>Selected date: {analysis.selectedTradeDay}</div>
         <div>Candidate summary: {selectedAnalysisCandidate?.shortSummary ?? "none"}</div>
         <div>Current stage: {analysis.stage}</div>
-        <div>Can reply now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}</div>
+        <div>Can enter now: {analysis.lastReplyEval.canReply ? "Yes" : "No"}</div>
         <div>Current gate: {analysis.lastReplyEval.explanation}</div>
-        <div>Trade / practice mode: {replyModeLabel(tradeState.mode)}</div>
-        <div>Candidate list filter: {isPracticeMode ? "needs-practice only" : "all scanned days"}</div>
+        <div>Reply mode: {replyModeLabel(tradeState.mode)}</div>
+        <div>Date list: {isPracticeMode ? "needs-practice only" : "all scanned days"}</div>
         <div>
-          Current position: {tradeState.currentPosition ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)} (${entrySemanticsLabel(tradeState.currentPosition.entrySemantics)})` : "Flat"}
+          Open position: {tradeState.currentPosition ? `${tradeState.currentPosition.side.toUpperCase()} @ ${tradeState.currentPosition.entryPrice.toFixed(4)} (${entrySemanticsLabel(tradeState.currentPosition.entrySemantics)})` : "No open trade"}
         </div>
         <div>Last trade result: {formatTradeResult(tradeState.lastTrade)}</div>
         <div>Cumulative PnL: {formatPnL(tradeState.cumulativePnL)}</div>
-        <div>Unlocked target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "none"}</div>
+        <div>Current target tier: {analysis.recommendedTarget ? `TP${analysis.recommendedTarget}` : "none"}</div>
         <div>Manifest pair count: {manifestDiagnostics?.manifestPairCount ?? datasets.length}</div>
-        <div>Visible pair count in UI: {visiblePairCount}</div>
+        <div>Pairs shown in app: {visiblePairCount}</div>
         <div>Official manifest complete: {hasCompleteOfficialManifest ? "Yes" : "No"}</div>
         <div>Selected pair key: {selectedPairKey}</div>
         <div>Next target gate: {effectiveTargetLevels.find((level) => !level.eligible)?.missingGate ?? "All target tiers unlocked."}</div>
@@ -1015,7 +1015,7 @@ export default function App() {
       )}
       <section className="footer-grid">
         <div>
-          <h3>Detected candidate dates</h3>
+          <h3>Detected Day 3 dates</h3>
           <ul>
             {visibleCandidateTradeDays.map((candidate) => (
               <li key={candidate.eventId}>{candidate.date} — {candidate.template} — {candidate.valid ? "valid" : "invalid"} — {candidate.eventId}</li>
@@ -1025,7 +1025,7 @@ export default function App() {
       </section>
       <section className="footer-grid">
         <div>
-          <h3>Target ladder</h3>
+          <h3>Target levels</h3>
           <ul>
             {effectiveTargetLevels.map((level) => (
               <li key={level.tier}>TP{level.tier}: {level.status} @ {level.price.toFixed(4)} — {level.reason}{level.missingGate ? ` Missing gate: ${level.missingGate}` : ""}</li>
@@ -1033,7 +1033,7 @@ export default function App() {
           </ul>
         </div>
         <div>
-          <h3>Trade ledger</h3>
+          <h3>Trade summary</h3>
           <ul>
             <li>Open position: {tradeState.currentPosition ? tradeState.currentPosition.id : "none"}</li>
             <li>Closed trades: {tradeState.trades.length}</li>
@@ -1047,23 +1047,23 @@ export default function App() {
           </ul>
         </div>
         <div>
-          <h3>Diagnostics</h3>
+          <h3>Data checks</h3>
           <ul>
             <li>Pair index file: {selectedDataset?.indexPath}</li>
             <li>Event file: {selectedAnalysisCandidate?.datasetPath}</li>
-            <li>Dataset source: {describeSourceType()}</li>
+            <li>Data source: {describeSourceType()}</li>
             <li>Bars loaded: {activeDataset.bars1m.length}</li>
             <li>Parse errors: {activeDataset.parseErrors.join(" | ") || "none"}</li>
             <li>Accepted formats / notes: {activeDataset.parseDiagnostics.join(" | ") || "none"}</li>
-            <li>Replay range: {analysis.replayStartIndex} → {analysis.replayEndIndex}</li>
+            <li>Event range: {analysis.replayStartIndex} → {analysis.replayEndIndex}</li>
             <li>Invalid messages: {analysis.invalidReasons.join(" | ") || "none"}</li>
-            <li>Manual gate source: {analysis.lastReplyEval.explanation}</li>
-            <li>Trade entry semantics in use: {entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? resolvedEntryConfig.entrySemantics)}</li>
+            <li>Entry gate reason: {analysis.lastReplyEval.explanation}</li>
+            <li>Entry price basis in use: {entrySemanticsLabel(tradeState.currentPosition?.entrySemantics ?? resolvedEntryConfig.entrySemantics)}</li>
             <li>Effective stop distance: {formatPrice(effectiveStopDistance)}</li>
             <li>Effective stop distance (pips/units): {effectiveStopDistancePips ?? "n/a"}</li>
             <li>Instrument pip size / point size: {analysis.instrument.pipSize} / {analysis.instrument.pointSize}</li>
             <li>Manifest pair count: {manifestDiagnostics?.manifestPairCount ?? datasets.length}</li>
-            <li>Visible pair count in UI: {visiblePairCount}</li>
+            <li>Pairs shown in app: {visiblePairCount}</li>
             <li>Selected pair key: {selectedPairKey}</li>
             <li>Missing pair folders: {manifestDiagnostics?.missingPairFolders.join(" | ") || "none"}</li>
             <li>Skipped pair folders: {manifestDiagnostics?.skippedPairFolders.map((item) => `${item.pairKey}: ${item.reason}`).join(" | ") || "none"}</li>
