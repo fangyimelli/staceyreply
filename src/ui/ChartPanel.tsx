@@ -118,17 +118,17 @@ const CustomTooltip = ({ active, payload }: any) => {
       <strong>{annotation?.label ?? candle?.fullLabel}</strong>
       {annotation ? (
         <>
-          <div>Rule: {annotation.label}</div>
-          <div>Reason: {annotation.reasoning}</div>
-          <div>Normalized time: {normalizedLabel(annotation.barTime)}</div>
+          <div>Marker: {annotation.label}</div>
+          <div>Why: {annotation.reasoning}</div>
+          <div>Strategy time: {normalizedLabel(annotation.barTime)}</div>
           <div>Price: {annotation.price.toFixed(4)}</div>
-          <div>Trace: {traceText(annotation.trace)}</div>
+          <div>Rule trace: {traceText(annotation.trace)}</div>
         </>
       ) : candle ? (
         <>
-          <div>Normalized time: {candle.fullLabel}</div>
+          <div>Strategy time: {candle.fullLabel}</div>
           <div>Source time: {candle.sourceLabel}</div>
-          {dstAdjusted(candle) && <div>DST-adjusted</div>}
+          {dstAdjusted(candle) && <div>DST adjusted</div>}
           <div>
             O {candle.open.toFixed(4)} H {candle.high.toFixed(4)} L {candle.low.toFixed(4)} C{' '}
             {candle.close.toFixed(4)}
@@ -287,28 +287,28 @@ export function ChartPanel({
     <section className="chart-shell">
       <div className="status-banner">{statusBanner}</div>
       <div className="chart-stage-note">
-        Score: {unifiedStrategy.score}/100 · Band: {unifiedStrategy.scoreBand} · Entry allowed: {unifiedStrategy.entryAllowed ? 'yes' : 'no'}
+        Setup score: {unifiedStrategy.score}/100 · Band: {unifiedStrategy.scoreBand} · Entry ready: {unifiedStrategy.entryAllowed ? 'yes' : 'no'}
       </div>
       <div className="chart-stage-note">
-        Direction: {unifiedStrategy.direction} · Template: {unifiedStrategy.templateType ?? 'n/a'}
+        Direction: {unifiedStrategy.direction} · Setup: {unifiedStrategy.templateType ?? 'n/a'}
       </div>
       <div className="chart-stage-note">
-        Hard gates: {unifiedStrategy.hardGates.map((gate) => `${gate.key}:${gate.passed ? 'pass' : 'fail'}`).join(' · ')}
+        Key gates: {unifiedStrategy.hardGates.map((gate) => `${gate.key}:${gate.passed ? 'pass' : 'fail'}`).join(' · ')}
       </div>
       <div className="chart-stage-note">
-        Score breakdown: {Object.entries(unifiedStrategy.debugBreakdown.byCategory).map(([category, score]) => `${category}=${score}`).join(' · ')}
+        Score mix: {Object.entries(unifiedStrategy.debugBreakdown.byCategory).map(([category, score]) => `${category}=${score}`).join(' · ')}
       </div>
       <div className="chart-stage-note">
-        Top positive features: {unifiedStrategy.debugBreakdown.topPositiveFeatures.map((feature) => `${feature.key}(+${feature.contribution})`).join(' · ') || 'none'}
+        Best supporting clues: {unifiedStrategy.debugBreakdown.topPositiveFeatures.map((feature) => `${feature.key}(+${feature.contribution})`).join(' · ') || 'none'}
       </div>
       <div className="chart-stage-note">
-        Missing high-value features: {unifiedStrategy.debugBreakdown.missingHighValueFeatures.map((feature) => feature.key).join(' · ') || 'none'}
+        Still missing: {unifiedStrategy.debugBreakdown.missingHighValueFeatures.map((feature) => feature.key).join(' · ') || 'none'}
       </div>
       <div className="chart-stage-note">
-        Replay marker: {replayMarkerTime ? toNyLabel(replayMarkerTime) : 'n/a'}
+        Current bar: {replayMarkerTime ? toNyLabel(replayMarkerTime) : 'n/a'}
       </div>
       <div className="chart-interaction-note">
-        Wheel to zoom the visible range. Drag to pan within revealed bars.
+        Scroll to zoom. Drag to move across revealed bars.
       </div>
       <div
         ref={chartRef}

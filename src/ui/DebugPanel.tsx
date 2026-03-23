@@ -44,8 +44,8 @@ export function DebugPanel({
     <section className="debug-shell">
       <div className="debug-header">
         <div>
-          <h2>Debug Page</h2>
-          <p>Unified Signal-Day Scoring Engine diagnostics.</p>
+          <h2>Developer debug tools</h2>
+          <p>Technical scoring and dataset diagnostics for development use.</p>
         </div>
         <div className="debug-pill-row">
           <span className="debug-pill">Dataset: {activeDataset.sourceLabel}</span>
